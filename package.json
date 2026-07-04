@@ -1,0 +1,25 @@
+{
+  "name": "neowatch",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NEOWATCH - watch all the world's free live TV channels (sports/football, news, movies, kids, music...).",
+  "type": "module",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n SERVER,WEB -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm --workspace server run dev",
+    "dev:web": "npm --workspace web run dev",
+    "build": "npm --workspace web run build",
+    "start": "NODE_ENV=production node server/src/index.js",
+    "typecheck": "npm --workspace web run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

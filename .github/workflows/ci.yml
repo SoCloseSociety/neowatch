@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck (web)
+        run: npm --workspace web run typecheck
+
+      - name: Build (web)
+        run: npm --workspace web run build
+
+      - name: Start server + integration suite
+        env:
+          PORT: 8787
+          ADMIN_EMAIL: ci-admin@neowatch.local
+          ADMIN_PASSWORD: ci-test-password-123
+          JWT_SECRET: ci-only-non-secret-jwt-key-please-override-in-prod
+          NODE_ENV: test
+        run: |
+          npm start &
+          SERVER_PID=$!
+          echo "Waiting for /api/health…"
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:8787/api/health >/dev/null; then echo "up"; break; fi
+            sleep 3
+          done
+          echo "Warming the catalog (first request builds it)…"
+          for i in $(seq 1 40); do
+            TOTAL=$(curl -sf "http://localhost:8787/api/catalog/meta" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).total||0)}catch{console.log(0)}})' || echo 0)
+            if [ "$TOTAL" -gt 0 ] 2>/dev/null; then echo "catalog ready: $TOTAL channels"; break; fi
+            sleep 5
+          done
+          BASE=http://localhost:8787 node tasks/integration-test.mjs
+          STATUS=$?
+          kill $SERVER_PID 2>/dev/null || true
+          exit $STATUS

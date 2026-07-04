@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "co.soclose.neowatch.twa",
+        "sha256_cert_fingerprints": ["C8:6E:CD:AA:20:4C:11:61:AE:1D:72:B7:37:8A:0D:4D:E5:45:37:0E:07:28:4E:B1:EB:16:4F:EA:C9:E8:F2:61"]
+      }
+    }]

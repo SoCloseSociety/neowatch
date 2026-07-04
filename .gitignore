@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.cache/
+*.log
+.DS_Store
+.env
+.env.local
+.env.*.local
+server/.cache/
+web/dist/
+# Runtime state: user accounts (hashed pw), sources, EPG/health caches -- never commit
+.data/
+server/.data/
+*.tsbuildinfo
+
+# Hosted TWA APK (deployed, not versioned)
+web/public/app.apk
+
+# PWABuilder package (signing keystore + password) -- NEVER commit
+NEOWATCH - Google Play package/
+NEOWATCH - Google Play package.zip
+*.keystore
+signing-key-info.txt

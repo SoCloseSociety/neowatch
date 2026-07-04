@@ -1,0 +1,27 @@
+services:
+  neowatch:
+    build: .
+    image: neowatch:latest
+    container_name: neowatch
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8787}:8787"
+    environment:
+      NODE_ENV: production
+      PORT: 8787
+      # Uncomment for a shared deployment with friends:
+      # REQUIRE_AUTH: "true"
+      # ALLOW_REGISTER: "false"
+      # JWT_SECRET: "change-me-to-a-long-random-string"
+      # ADMIN_EMAIL: "you@example.com"
+      # ADMIN_PASSWORD: "a-strong-password"
+      CATALOG_TTL_HOURS: "12"
+      HIDE_NSFW: "true"
+    volumes:
+      # Persist the catalog cache + the user store across restarts.
+      - neowatch-cache:/app/server/.cache
+      - neowatch-data:/app/server/.data
+
+volumes:
+  neowatch-cache:
+  neowatch-data:

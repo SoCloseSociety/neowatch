@@ -1,0 +1,139 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent: 34 211 238;
+  --surface: 10 14 20;
+  --panel: 17 23 33;
+  --ink: 226 232 240;
+}
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    color: rgb(var(--ink));
+    font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    overscroll-behavior: none;
+    /* Premium depth: cyan glow top-left + violet glow top-right over the surface. */
+    background:
+      radial-gradient(1100px 520px at 8% -8%, rgb(var(--accent) / 0.10), transparent 60%),
+      radial-gradient(900px 480px at 100% 0%, rgba(124, 92, 252, 0.07), transparent 55%),
+      rgb(var(--surface));
+    background-attachment: fixed;
+  }
+  /* High-contrast focus ring on EVERY interactive element — essential for TV
+     remote / D-pad and keyboard navigation. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent));
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  /* Thicker ring on large screens / TVs where the viewer sits far away. */
+  @media (min-width: 1536px) {
+    :focus-visible {
+      outline-width: 3px;
+    }
+  }
+  [data-motion='reduce'] * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+  /* TV browsers / WebViews sometimes force their own media UI (a fullscreen button,
+     a play/close overlay) onto a <video> even with controls disabled. Hide it on our
+     controls-less videos (mosaic tiles) so it never blocks the picture. The single
+     player sets `controls` and keeps the native UI. */
+  video:not([controls])::-webkit-media-controls,
+  video:not([controls])::-webkit-media-controls-enclosure,
+  video:not([controls])::-webkit-media-controls-panel,
+  video:not([controls])::-webkit-media-controls-overlay-play-button,
+  video:not([controls])::-webkit-media-controls-start-playback-button,
+  video:not([controls])::-webkit-media-controls-fullscreen-button {
+    display: none !important;
+    -webkit-appearance: none !important;
+    opacity: 0 !important;
+  }
+  /* Respect notches / rounded corners when installed as a PWA. */
+  @supports (padding: max(0px)) {
+    header {
+      padding-top: max(0.5rem, env(safe-area-inset-top));
+    }
+  }
+}
+
+@layer components {
+  .input {
+    @apply rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink placeholder:text-ink/30 focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30;
+  }
+  /* Text input with a leading icon (login/account fields). */
+  .field-input {
+    @apply w-full rounded-xl border border-white/10 bg-black/30 py-2.5 pl-9 pr-3 text-sm text-ink placeholder:text-ink/30 focus:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/30;
+  }
+  /* Frosted glass surface used by bars/panels. */
+  .glass {
+    @apply border border-white/[0.07] bg-panel/70 backdrop-blur-xl;
+  }
+  /* Accent gradient text for headlines. */
+  .text-gradient {
+    background: linear-gradient(100deg, rgb(var(--ink)), rgb(var(--accent)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+@layer utilities {
+  /* Slow cinematic zoom for hero backdrops. */
+  @keyframes kenburns {
+    from { transform: scale(1.02); }
+    to { transform: scale(1.08); }
+  }
+  .animate-kenburns {
+    animation: kenburns 30s ease-in-out infinite alternate;
+  }
+  /* Card lift on hover/focus. */
+  .lift {
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+  .lift:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 30px -12px rgb(var(--accent) / 0.35);
+  }
+  /* Horizontal rails: hide the scrollbar entirely. */
+  .nw-scroll::-webkit-scrollbar { height: 0; width: 0; }
+  .nw-scroll { scrollbar-width: none; scroll-behavior: smooth; }
+  /* Thin scrollbar for inner panels (e.g. live chat). */
+  .nw-thin::-webkit-scrollbar { width: 6px; }
+  .nw-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 6px; }
+  .nw-thin { scrollbar-width: thin; }
+  /* Native windowing: the browser skips rendering off-screen cards (huge perf
+     win on the 16k-channel grid) while remembering their real size. */
+  .cv-card { content-visibility: auto; contain-intrinsic-size: auto 220px; }
+}
+
+/* Sleek dark scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--ink) / 0.12);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--accent) / 0.4);
+  background-clip: content-box;
+}

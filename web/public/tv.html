@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Installer NEOWATCH sur votre TV</title>
+<meta name="theme-color" content="#0a0e14">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --accent:#22D3EE; --live:#FF3B47; --ink:#E6EBF2; --ink2:rgba(230,235,242,.62); --ink3:rgba(230,235,242,.4); --line:rgba(255,255,255,.08); }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:'Manrope',system-ui,sans-serif; color:var(--ink);
+    background:radial-gradient(1100px 520px at 8% -8%,rgba(34,211,238,.10),transparent 60%),radial-gradient(900px 480px at 100% 0%,rgba(124,92,252,.07),transparent 55%),#0A0E14;
+    min-height:100vh; padding:clamp(20px,5vw,56px); }
+  .wrap { max-width:1100px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:11px; margin-bottom:8px; }
+  .dot { width:12px; height:12px; border-radius:50%; background:var(--live); box-shadow:0 0 12px var(--live); }
+  .brand b { font-weight:800; letter-spacing:.16em; font-size:20px; }
+  h1 { font-size:clamp(26px,4vw,42px); font-weight:800; letter-spacing:-.02em; margin:14px 0 6px; }
+  .sub { color:var(--ink2); font-size:clamp(14px,1.6vw,17px); max-width:620px; margin:0 0 28px; }
+  .grid { display:grid; gap:18px; grid-template-columns:1fr; }
+  @media (min-width:760px){ .grid { grid-template-columns:1.3fr 1fr; } }
+  .card { border:1px solid var(--line); background:rgba(255,255,255,.025); border-radius:18px; padding:clamp(18px,2.5vw,26px); }
+  .tag { display:inline-flex; align-items:center; gap:7px; font:700 11px 'JetBrains Mono'; letter-spacing:.16em; color:var(--accent); margin-bottom:12px; }
+  .num { display:grid; place-items:center; width:24px; height:24px; border-radius:50%; background:var(--accent); color:#06151a; font:800 12px 'Manrope'; }
+  .step { display:flex; gap:13px; align-items:flex-start; margin:14px 0; }
+  .step p { margin:0; font-size:15px; line-height:1.5; color:var(--ink); }
+  .step small { color:var(--ink3); }
+  .code { display:inline-block; font:700 clamp(18px,2.6vw,26px) 'JetBrains Mono'; color:#fff; background:rgba(34,211,238,.12); border:1px solid rgba(34,211,238,.4); border-radius:12px; padding:10px 16px; letter-spacing:.02em; margin-top:6px; user-select:all; }
+  .qr { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+  .qr img { width:min(260px,70vw); height:auto; border-radius:16px; background:#fff; padding:12px; }
+  .qr p { color:var(--ink2); font-size:13px; margin:14px 0 0; }
+  .cta { display:inline-flex; align-items:center; gap:9px; margin-top:18px; height:50px; padding:0 26px; border:none; border-radius:13px; background:var(--accent); color:#06151a; font:800 16px 'Manrope'; text-decoration:none; box-shadow:0 12px 30px -10px rgba(34,211,238,.55); }
+  .foot { margin-top:30px; color:var(--ink3); font:500 12px 'JetBrains Mono'; letter-spacing:.04em; }
+  b.accent { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><span class="dot"></span><b>NEO<span style="color:var(--accent)">WATCH</span></b></div>
+  <h1>Installer sur votre TV en 30 secondes</h1>
+  <p class="sub">Des milliers de chaînes en direct — sport &amp; foot, news, films, séries — sur votre Android&nbsp;TV, Google&nbsp;TV ou Fire&nbsp;TV. Choisissez la méthode la plus simple pour vous.</p>
+
+  <div class="grid">
+    <div class="card">
+      <span class="tag">⚡ LE PLUS SIMPLE · ANDROID / GOOGLE / FIRE TV</span>
+      <div class="step"><span class="num">1</span><p>Sur la TV, ouvrez l'app <b>Downloader</b> (gratuite sur le store de la TV).</p></div>
+      <div class="step"><span class="num">2</span><p>Tapez cette adresse, puis <b>Go</b> :<br><span class="code">neowatch.soclose.co/app.apk</span></p></div>
+      <div class="step"><span class="num">3</span><p>Confirmez l'installation → <b class="accent">NEOWATCH apparaît sur l'écran d'accueil</b>, plein écran, prêt à la télécommande.</p></div>
+      <a class="cta" href="/app.apk">▶ Télécharger l'app (.apk)</a>
+      <p class="foot">Astuce : une fois installée, l'app se met à jour toute seule (elle charge toujours la dernière version).</p>
+    </div>
+
+    <div class="card qr">
+      <span class="tag" style="align-self:flex-start">📱 OU VIA VOTRE TÉLÉPHONE</span>
+      <img src="/tv-qr.png" alt="QR NEOWATCH">
+      <p>Scannez avec votre téléphone, ouvrez le lien, puis <b style="color:var(--ink)">« Ajouter à l'écran d'accueil »</b>. Vous pouvez aussi diffuser (Cast) vers la TV.</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <span class="tag">📺 TV AVEC NAVIGATEUR (Samsung, LG…)</span>
+    <p class="step" style="margin:6px 0 0"><span class="num">→</span><span>Ouvrez le navigateur de la TV et allez sur <b class="accent">neowatch.soclose.co</b> — navigation à la télécommande intégrée. Ajoutez la page aux favoris pour un accès direct.</span></p>
+  </div>
+
+  <p class="foot">© 2026 NEOWATCH · Flux librement accessibles via iptv-org · <a href="/" style="color:var(--accent);text-decoration:none">Ouvrir l'app web ›</a></p>
+</div>
+</body>
+</html>

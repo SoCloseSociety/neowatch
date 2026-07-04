@@ -1,0 +1,19 @@
+{
+  "name": "NEOWATCH -- Chaînes en direct",
+  "short_name": "NEOWATCH",
+  "description": "Toutes les chaînes de TV en direct : sport, foot, news, films, kids, musique.",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0e14",
+  "theme_color": "#0a0e14",
+  "categories": ["entertainment", "news", "sports"],
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

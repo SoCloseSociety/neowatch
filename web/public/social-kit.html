@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEOWATCH — Social Kit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#e7e5df; font-family:'Manrope',system-ui,sans-serif; --accent:#22D3EE; --live:#FF3B47; --gold:#F5C451; --ink:#E6EBF2; --ink-2:rgba(230,235,242,.6); --surface:#0A0E14; }
+  .wrap { width:max-content; min-width:100%; box-sizing:border-box; padding:52px; }
+  .slot-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  .sect { margin-bottom:64px; }
+  .sect-h { display:flex; align-items:center; gap:12px; margin-bottom:20px; }
+  .sect-h .lbl { font:700 12px 'JetBrains Mono'; letter-spacing:.22em; color:#7a786f; }
+  .sect-h .ln { flex:1; height:1px; background:rgba(0,0,0,.12); }
+  .row { display:flex; gap:48px; align-items:flex-start; }
+  .cap { font:600 12px 'Manrope'; color:#3a3a36; margin-bottom:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HEADER -->
+  <div style="margin-bottom:48px;max-width:760px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <span style="width:13px;height:13px;border-radius:50%;background:var(--live);box-shadow:0 0 12px var(--live);"></span>
+      <span style="font-weight:800;letter-spacing:.16em;font-size:22px;color:#14171c;">NEO<span style="color:#0b8fa6;">WATCH</span></span>
+      <span style="margin-left:6px;font:700 11px 'JetBrains Mono';letter-spacing:.2em;color:#7a786f;">SOCIAL KIT</span>
+    </div>
+    <h1 style="margin:0 0 8px;font-size:34px;font-weight:800;letter-spacing:-.02em;color:#1a1d22;">Kit réseaux sociaux</h1>
+    <p style="margin:0;font-size:14px;line-height:1.6;color:#54524a;">Identité, posts, stories et bannières — chaque cadre est à sa taille réelle d'export.</p>
+  </div>
+
+  <!-- 01 IDENTITÉ -->
+  <div class="sect">
+    <div class="sect-h"><span class="lbl">01 · IDENTITÉ</span><span class="ln"></span></div>
+    <div class="row">
+      <div style="flex:none;">
+        <div class="cap">Icône d'app · 1024×1024</div>
+        <div data-export="icon-1024" style="width:1024px;height:1024px;border-radius:180px;overflow:hidden;position:relative;background:radial-gradient(120% 120% at 28% 18%, rgba(34,211,238,.22), transparent 55%), radial-gradient(120% 120% at 100% 100%, rgba(124,92,252,.18), transparent 55%), #0A0E14;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:60px;">
+          <div style="position:relative;width:430px;height:430px;display:grid;place-items:center;">
+            <svg width="430" height="430" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="45" stroke="rgba(34,211,238,.28)" stroke-width="2"/><circle cx="50" cy="50" r="33" stroke="rgba(34,211,238,.16)" stroke-width="2"/><path d="M41 31 L72 50 L41 69 Z" fill="#22D3EE"/></svg>
+            <span style="position:absolute;top:34px;right:50px;width:34px;height:34px;border-radius:50%;background:var(--live);box-shadow:0 0 30px var(--live);"></span>
+          </div>
+          <span style="font-weight:800;letter-spacing:.22em;font-size:60px;color:#fff;">NEO<span style="color:var(--accent);">WATCH</span></span>
+        </div>
+      </div>
+      <div style="flex:none;">
+        <div class="cap">Photo de profil · 400×400</div>
+        <div data-export="avatar-400" style="width:400px;height:400px;border-radius:50%;overflow:hidden;position:relative;background:radial-gradient(120% 120% at 30% 20%, rgba(34,211,238,.24), transparent 55%), #0A0E14;display:grid;place-items:center;">
+          <svg width="200" height="200" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="45" stroke="rgba(34,211,238,.3)" stroke-width="2.5"/><path d="M41 31 L72 50 L41 69 Z" fill="#22D3EE"/></svg>
+          <span style="position:absolute;top:96px;right:118px;width:20px;height:20px;border-radius:50%;background:var(--live);box-shadow:0 0 20px var(--live);"></span>
+        </div>
+      </div>
+      <div style="flex:none;">
+        <div class="cap">Favicon · 256×256</div>
+        <div data-export="favicon-256" style="width:256px;height:256px;border-radius:48px;overflow:hidden;position:relative;background:#0A0E14;display:grid;place-items:center;">
+          <svg width="150" height="150" viewBox="0 0 100 100" fill="none"><path d="M41 31 L72 50 L41 69 Z" fill="#22D3EE"/></svg>
+          <span style="position:absolute;top:58px;right:70px;width:18px;height:18px;border-radius:50%;background:var(--live);box-shadow:0 0 16px var(--live);"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 02 POSTS IG -->
+  <div class="sect">
+    <div class="sect-h"><span class="lbl">02 · POSTS INSTAGRAM · 1080×1080</span><span class="ln"></span></div>
+    <div class="row">
+      <div style="flex:none;">
+        <div class="cap">Affiche match · Le Classique</div>
+        <div data-export="ig-match" style="width:1080px;height:1080px;position:relative;overflow:hidden;background:#0A0E14;">
+          <img class="slot-img" src="/social-bg/ig-match.jpg" alt="">
+          <div style="position:absolute;inset:0;background:linear-gradient(0deg, rgba(8,11,17,.96) 6%, rgba(8,11,17,.35) 48%, rgba(8,11,17,.7) 100%);"></div>
+          <div style="position:absolute;inset:0;padding:72px;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div style="display:flex;align-items:center;gap:14px;"><span style="width:18px;height:18px;border-radius:50%;background:var(--live);box-shadow:0 0 16px var(--live);"></span><span style="font-weight:800;letter-spacing:.16em;font-size:34px;color:#fff;">NEO<span style="color:var(--accent);">WATCH</span></span></div>
+              <span style="display:inline-flex;align-items:center;gap:10px;padding:11px 20px;border-radius:10px;background:var(--live);font:800 22px 'JetBrains Mono';letter-spacing:.1em;color:#fff;"><span style="width:11px;height:11px;border-radius:50%;background:#fff;"></span>EN DIRECT</span>
+            </div>
+            <div style="margin-top:auto;">
+              <div style="font:700 24px 'JetBrains Mono';letter-spacing:.16em;color:var(--accent);margin-bottom:22px;">LE CLASSIQUE · LIGUE 1</div>
+              <h2 style="margin:0;font-size:148px;font-weight:800;line-height:.92;letter-spacing:-.03em;color:#fff;">Paris<br><span style="color:var(--ink-2);font-weight:500;font-size:.5em;">contre</span> Marseille</h2>
+              <div style="display:flex;align-items:center;gap:18px;margin-top:38px;">
+                <span style="padding:14px 24px;border-radius:12px;background:var(--accent);color:#06151a;font:800 30px 'Manrope';">Ce soir · 21:00</span>
+                <span style="font:600 26px 'Manrope';color:#fff;">UHD 4K · Parc des Princes</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:none;">
+        <div class="cap">Top 10 de la semaine</div>
+        <div data-export="ig-top10" style="width:1080px;height:1080px;position:relative;overflow:hidden;background:radial-gradient(120% 90% at 80% 0%, rgba(34,211,238,.16), transparent 55%), #0A0E14;">
+          <span style="position:absolute;right:-40px;bottom:-160px;font:800 720px 'Manrope';line-height:.7;color:transparent;-webkit-text-stroke:3px rgba(255,255,255,.1);">10</span>
+          <div style="position:absolute;inset:0;padding:72px;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;gap:14px;"><span style="width:18px;height:18px;border-radius:50%;background:var(--live);box-shadow:0 0 16px var(--live);"></span><span style="font-weight:800;letter-spacing:.16em;font-size:34px;color:#fff;">NEO<span style="color:var(--accent);">WATCH</span></span></div>
+            <div style="margin-top:auto;">
+              <div style="font:700 24px 'JetBrains Mono';letter-spacing:.16em;color:var(--accent);margin-bottom:18px;">CLASSEMENT · FRANCE</div>
+              <h2 style="margin:0 0 28px;font-size:128px;font-weight:800;line-height:.9;letter-spacing:-.03em;color:#fff;">Le Top 10<br>de la semaine</h2>
+              <div style="display:flex;flex-direction:column;gap:14px;max-width:680px;">
+                <div style="display:flex;align-items:center;gap:20px;"><span style="font:800 40px 'Manrope';color:var(--accent);width:52px;">1</span><span style="font:600 34px 'Manrope';color:#fff;">Le Classique · Paris – Marseille</span></div>
+                <div style="display:flex;align-items:center;gap:20px;"><span style="font:800 40px 'Manrope';color:rgba(255,255,255,.4);width:52px;">2</span><span style="font:600 34px 'Manrope';color:rgba(255,255,255,.78);">Édition spéciale du soir</span></div>
+                <div style="display:flex;align-items:center;gap:20px;"><span style="font:800 40px 'Manrope';color:rgba(255,255,255,.4);width:52px;">3</span><span style="font:600 34px 'Manrope';color:rgba(255,255,255,.78);">NBA · Lakers – Celtics</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:none;">
+        <div class="cap">Promo Premium</div>
+        <div data-export="ig-premium" style="width:1080px;height:1080px;position:relative;overflow:hidden;background:radial-gradient(120% 100% at 50% 0%, rgba(245,196,81,.16), transparent 55%), #0A0E14;">
+          <div style="position:absolute;inset:0;padding:80px;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;gap:14px;"><span style="width:18px;height:18px;border-radius:50%;background:var(--live);box-shadow:0 0 16px var(--live);"></span><span style="font-weight:800;letter-spacing:.16em;font-size:34px;color:#fff;">NEO<span style="color:var(--accent);">WATCH</span></span></div>
+            <div style="margin-top:auto;">
+              <div style="display:inline-flex;align-items:center;gap:12px;margin-bottom:26px;"><svg width="40" height="40" viewBox="0 0 24 24" fill="#F5C451"><path d="M3 7l4.5 4L12 5l4.5 6L21 7l-1.8 11H4.8L3 7z"/></svg><span style="font:800 30px 'JetBrains Mono';letter-spacing:.16em;color:var(--gold);">PREMIUM</span></div>
+              <h2 style="margin:0 0 18px;font-size:120px;font-weight:800;line-height:.9;letter-spacing:-.03em;color:#fff;">Sans pub.<br>Sans limite.</h2>
+              <p style="margin:0 0 40px;font:500 34px 'Manrope';color:var(--ink-2);">Sport &amp; foot, films, séries et vos playlists.</p>
+              <div style="display:flex;align-items:center;gap:24px;">
+                <span style="padding:18px 34px;border-radius:14px;background:var(--gold);color:#1a1407;font:800 38px 'Manrope';">-50% le 1er mois</span>
+                <span style="font:600 30px 'Manrope';color:#fff;">dès 6,99 €/mois</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 03 STORIES -->
+  <div class="sect">
+    <div class="sect-h"><span class="lbl">03 · STORIES · 1080×1920</span><span class="ln"></span></div>
+    <div class="row">
+      <div style="flex:none;">
+        <div class="cap">Story match · plein écran</div>
+        <div data-export="story-classique" style="width:1080px;height:1920px;position:relative;overflow:hidden;background:#0A0E14;">
+          <img class="slot-img" src="/social-bg/story-classique.jpg" alt="">
+          <div style="position:absolute;inset:0;background:linear-gradient(0deg, rgba(8,11,17,.97) 8%, rgba(8,11,17,.2) 45%, rgba(8,11,17,.75) 100%);"></div>
+          <div style="position:absolute;inset:0;padding:90px 72px 120px;display:flex;flex-direction:column;align-items:center;text-align:center;">
+            <div style="display:flex;align-items:center;gap:16px;"><span style="width:20px;height:20px;border-radius:50%;background:var(--live);box-shadow:0 0 18px var(--live);"></span><span style="font-weight:800;letter-spacing:.18em;font-size:40px;color:#fff;">NEO<span style="color:var(--accent);">WATCH</span></span></div>
+            <span style="margin-top:40px;display:inline-flex;align-items:center;gap:12px;padding:14px 26px;border-radius:12px;background:var(--live);font:800 28px 'JetBrains Mono';letter-spacing:.1em;color:#fff;"><span style="width:13px;height:13px;border-radius:50%;background:#fff;"></span>EN DIRECT · 21:00</span>
+            <div style="margin-top:auto;">
+              <div style="font:700 28px 'JetBrains Mono';letter-spacing:.16em;color:var(--accent);margin-bottom:26px;">LE CLASSIQUE · LIGUE 1</div>
+              <h2 style="margin:0;font-size:160px;font-weight:800;line-height:.9;letter-spacing:-.03em;color:#fff;">Paris<br><span style="color:var(--ink-2);font-weight:500;font-size:.45em;">vs</span> Marseille</h2>
+            </div>
+            <div style="margin-top:80px;display:flex;flex-direction:column;align-items:center;gap:22px;">
+              <span style="padding:24px 64px;border-radius:18px;background:var(--accent);color:#06151a;font:800 44px 'Manrope';">Regarder</span>
+              <span style="font:600 28px 'Manrope';color:rgba(255,255,255,.7);">16 000 chaînes en direct</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:none;">
+        <div class="cap">Story acquisition · installe l'app</div>
+        <div data-export="story-install" style="width:1080px;height:1920px;position:relative;overflow:hidden;background:radial-gradient(120% 60% at 50% 12%, rgba(34,211,238,.2), transparent 55%), #0A0E14;">
+          <div style="position:absolute;inset:0;padding:120px 80px;display:flex;flex-direction:column;align-items:center;text-align:center;">
+            <div style="display:flex;align-items:center;gap:16px;"><span style="width:20px;height:20px;border-radius:50%;background:var(--live);box-shadow:0 0 18px var(--live);"></span><span style="font-weight:800;letter-spacing:.18em;font-size:40px;color:#fff;">NEO<span style="color:var(--accent);">WATCH</span></span></div>
+            <div style="margin-top:130px;width:300px;height:300px;border-radius:68px;background:radial-gradient(120% 120% at 30% 20%, rgba(34,211,238,.24), transparent 55%), #0d121c;border:1px solid rgba(255,255,255,.08);display:grid;place-items:center;position:relative;box-shadow:0 30px 80px -20px rgba(34,211,238,.4);">
+              <svg width="170" height="170" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="45" stroke="rgba(34,211,238,.3)" stroke-width="2.5"/><path d="M41 31 L72 50 L41 69 Z" fill="#22D3EE"/></svg>
+              <span style="position:absolute;top:64px;right:78px;width:22px;height:22px;border-radius:50%;background:var(--live);box-shadow:0 0 20px var(--live);"></span>
+            </div>
+            <h2 style="margin:90px 0 24px;font-size:104px;font-weight:800;line-height:.92;letter-spacing:-.03em;color:#fff;">Toute la TV.<br>En direct.</h2>
+            <p style="margin:0;font:500 36px 'Manrope';color:var(--ink-2);max-width:760px;">Sport, foot, news, films et séries du monde entier — installable en un geste.</p>
+            <div style="margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:24px;">
+              <span style="padding:26px 72px;border-radius:18px;background:var(--accent);color:#06151a;font:800 46px 'Manrope';">Installer l'app</span>
+              <span style="font:600 28px 'JetBrains Mono';letter-spacing:.08em;color:rgba(255,255,255,.5);">iOS · ANDROID · TV · WEB</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 04 PARTAGE & BANNIÈRES -->
+  <div class="sect">
+    <div class="sect-h"><span class="lbl">04 · PARTAGE &amp; BANNIÈRES</span><span class="ln"></span></div>
+    <div class="row">
+      <div style="flex:none;">
+        <div class="cap">Carte de partage (Open Graph) · 1200×630</div>
+        <div data-export="og-card" style="width:1200px;height:630px;position:relative;overflow:hidden;background:#0A0E14;display:flex;">
+          <div style="flex:1;padding:72px;display:flex;flex-direction:column;justify-content:center;">
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:38px;"><span style="width:16px;height:16px;border-radius:50%;background:var(--live);box-shadow:0 0 16px var(--live);"></span><span style="font-weight:800;letter-spacing:.16em;font-size:32px;color:#fff;">NEO<span style="color:var(--accent);">WATCH</span></span></div>
+            <h2 style="margin:0 0 22px;font-size:88px;font-weight:800;line-height:.92;letter-spacing:-.03em;color:#fff;">Le direct,<br>sans limite.</h2>
+            <p style="margin:0;font:500 28px 'Manrope';color:var(--ink-2);">16 000 chaînes · Sport, foot, news, films &amp; séries du monde entier.</p>
+            <div style="margin-top:34px;display:flex;gap:12px;"><span style="padding:12px 20px;border:1px solid rgba(255,255,255,.16);border-radius:10px;font:600 20px 'Manrope';color:#fff;">176 pays</span><span style="padding:12px 20px;border:1px solid rgba(255,255,255,.16);border-radius:10px;font:600 20px 'Manrope';color:#fff;">Multi-écran</span><span style="padding:12px 20px;border:1px solid rgba(34,211,238,.4);background:rgba(34,211,238,.12);border-radius:10px;font:600 20px 'Manrope';color:var(--accent);">PWA</span></div>
+          </div>
+          <div style="width:420px;position:relative;">
+            <img class="slot-img" src="/social-bg/og-card.jpg" alt="">
+            <div style="position:absolute;inset:0;background:linear-gradient(90deg, #0A0E14 0%, transparent 35%);"></div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:none;">
+        <div class="cap">Bannière X / LinkedIn · 1500×500</div>
+        <div data-export="x-header" style="width:1500px;height:500px;position:relative;overflow:hidden;background:#0A0E14;">
+          <img class="slot-img" src="/social-bg/x-header.jpg" alt="">
+          <div style="position:absolute;inset:0;background:linear-gradient(90deg, rgba(8,11,17,.97) 30%, rgba(8,11,17,.55) 70%, rgba(8,11,17,.85) 100%);"></div>
+          <div style="position:absolute;inset:0;padding:0 80px;display:flex;flex-direction:column;justify-content:center;">
+            <div style="display:flex;align-items:center;gap:16px;margin-bottom:26px;"><span style="width:18px;height:18px;border-radius:50%;background:var(--live);box-shadow:0 0 16px var(--live);"></span><span style="font-weight:800;letter-spacing:.18em;font-size:44px;color:#fff;">NEO<span style="color:var(--accent);">WATCH</span></span></div>
+            <h2 style="margin:0 0 16px;font-size:72px;font-weight:800;line-height:.95;letter-spacing:-.02em;color:#fff;">Toute la TV du monde, en direct.</h2>
+            <p style="margin:0;font:600 26px 'JetBrains Mono';letter-spacing:.06em;color:var(--accent);">SPORT · FOOT · NEWS · FILMS · SÉRIES · MUSIQUE</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
