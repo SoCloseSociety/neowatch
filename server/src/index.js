@@ -15,7 +15,7 @@ import { billingPublicRouter, billingUserRouter, billingAdminRouter, stripeWebho
 import { rateLimit } from './ratelimit.js';
 import {
   initAuth, authenticate, requireAdmin, requireUser, gateContent, isPremium, userFromToken,
-  authRouter, adminRouter, prefsRouter, getStats,
+  authRouter, adminRouter, prefsRouter, getStats, privateNoStore,
 } from './auth.js';
 
 // A streaming proxy hits thousands of flaky CDNs; an upstream socket that drops
@@ -55,7 +55,16 @@ app.use((err, _req, res, next) => {
 // (the SPA is served by this server in prod, and proxied via Vite in dev), so
 // no website can call the API / proxy cross-origin unless you opt in.
 if (config.allowedOrigins.length) {
-  app.use(cors({ origin: config.allowedOrigins, credentials: false }));
+  // X-Renewed-Token carries the sliding-session renewal; a cross-origin client must be
+  // allowed to read it (same-origin, the prod/TWA case, needs nothing). The middleware
+  // runs only for an allow-listed Origin: the cors package would otherwise still emit
+  // Access-Control-Expose-Headers (without Allow-Origin) to any origin, and the
+  // Vary: Origin stays on every response so a shared cache never mixes the two.
+  const corsMw = cors({ origin: config.allowedOrigins, credentials: false, exposedHeaders: ['X-Renewed-Token'] });
+  app.use((req, res, next) => {
+    res.vary('Origin');
+    return config.allowedOrigins.includes(req.headers.origin) ? corsMw(req, res, next) : next();
+  });
 }
 app.use(authenticate); // populates req.user when a token is sent
 
@@ -84,7 +93,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, ...getStats() }));
 app.use('/api/auth', authRouter);
 // Throttle all admin endpoints (defence-in-depth: caps user enumeration + the
 // expensive M3U/EPG import fetches even if an admin token is compromised).
-app.use('/api/admin', rateLimit({ windowMs: 60_000, max: 100, name: 'admin' }));
+app.use('/api/admin', rateLimit({ windowMs: 60_000, max: 100, name: 'admin' }), privateNoStore);
 app.use('/api/admin', requireAdmin, adminRouter);
 app.use('/api/admin', requireAdmin, sourcesAdminRouter);
 app.use('/api/admin', requireAdmin, billingAdminRouter);

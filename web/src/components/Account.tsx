@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import { X, User as UserIcon, Crown, LogOut, KeyRound, Loader2, Check, SlidersHorizontal } from 'lucide-react';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, adoptToken } from '@/lib/api';
 import { useAuth } from '@/store/authStore';
 import { useUI } from '@/store/uiStore';
 import { useCatalog } from '@/store/catalogStore';
@@ -31,7 +31,9 @@ export function Account() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.put('/auth/password', { currentPassword: pw.current, newPassword: pw.next });
+      // The change signs every other device out; this one receives a fresh token.
+      const r = await api.put<{ ok: boolean; token?: string }>('/auth/password', { currentPassword: pw.current, newPassword: pw.next });
+      adoptToken(r.token);
       setPw({ current: '', next: '' });
       setMsg({ kind: 'ok', text: 'Mot de passe mis à jour.' });
     } catch (e2) {

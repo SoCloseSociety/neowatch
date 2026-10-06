@@ -13,6 +13,18 @@ const bool = (v, fallback) => {
   return v === '1' || v.toLowerCase() === 'true' || v.toLowerCase() === 'yes';
 };
 
+// "45s", "12h", "1d", "300ms" -> milliseconds. A bare number ("604800") is MILLISECONDS:
+// that is how jsonwebtoken (via `ms`) reads a unit-less STRING such as an env value, so we
+// read JWT_TTL the way the token will actually be signed (validateConfig warns about it).
+// Returns null when unset or unparseable, so the caller can fall back to a default.
+export function parseDurationMs(v) {
+  const m = /^\s*(\d+)\s*(ms|s|m|h|d)?\s*$/i.exec(String(v ?? ''));
+  if (!m) return null;
+  const unit = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[(m[2] || 'ms').toLowerCase()];
+  return Number(m[1]) * unit;
+}
+const hasUnit = (v) => /[a-z]\s*$/i.test(String(v ?? ''));
+
 export const config = {
   root: ROOT,
   port: Number(process.env.PORT) || 8787,
@@ -24,8 +36,9 @@ export const config = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
-  cacheDir: resolve(__dirname, '../.cache'),
-  dataDir: resolve(__dirname, '../.data'),
+  // Overridable so a throwaway test server never writes into the dev checkout's state.
+  cacheDir: process.env.CACHE_DIR ? resolve(process.env.CACHE_DIR) : resolve(__dirname, '../.cache'),
+  dataDir: process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : resolve(__dirname, '../.data'),
   webDist: resolve(ROOT, 'web/dist'),
   isProd: process.env.NODE_ENV === 'production',
 
@@ -40,8 +53,14 @@ export const config = {
   // so tokens/signed URLs survive restarts -- enforced at boot in index.js.
   jwtSecret: process.env.JWT_SECRET || randomBytes(48).toString('base64url'),
   jwtSecretExplicit: !!process.env.JWT_SECRET,
-  // Shorter default reduces the blast radius of a leaked token (no revocation list yet).
+  // Shorter default reduces the blast radius of a leaked token. Sessions that are
+  // USED slide (a fresh token is issued once a token is older than JWT_RENEW_AFTER,
+  // default half of its own lifetime); a token left unused expires at JWT_TTL.
+  // Revocation: each user carries a tokenVersion bumped on password change/disable.
+  // Always write a unit ("7d", "24h"): jsonwebtoken reads a bare number as MILLISECONDS
+  // (validateConfig warns, it does not refuse).
   jwtTtl: process.env.JWT_TTL || '7d',
+  jwtRenewAfterMs: parseDurationMs(process.env.JWT_RENEW_AFTER), // null = half-life
   // Separate key for HMAC URL signing (key separation from JWT). Derived from the
   // JWT secret with a distinct label so it survives restarts without a new env var,
   // or set SIGNING_SECRET explicitly.
@@ -106,6 +125,26 @@ export function validateConfig() {
       config.isProd || config.requireAuth ? 'Missing in prod/gated mode (boot refuses).' : 'Auto-generated (dev): tokens reset on restart. Set JWT_SECRET to persist sessions.');
   } else if (config.jwtSecret.length < 32) {
     add('warn', 'JWT_SECRET', 'Shorter than 32 chars; use a long random secret.');
+  }
+  // jsonwebtoken reads a unit-less string as MILLISECONDS: JWT_TTL=604800 is 10 minutes,
+  // not 7 days. Say so instead of letting every session die silently.
+  if (process.env.JWT_TTL && /^\s*\d+\s*$/.test(process.env.JWT_TTL)) {
+    add('warn', 'JWT_TTL', `"${process.env.JWT_TTL}" has no unit: jsonwebtoken reads it as milliseconds (${Math.round(Number(process.env.JWT_TTL) / 1000)} s). Write e.g. 7d or 24h.`);
+  }
+  if (process.env.JWT_RENEW_AFTER && config.jwtRenewAfterMs === null) {
+    add('warn', 'JWT_RENEW_AFTER', `"${process.env.JWT_RENEW_AFTER}" is not a duration (e.g. 1d, 12h); using half of JWT_TTL.`);
+  } else if (config.jwtRenewAfterMs === 0) {
+    add('warn', 'JWT_RENEW_AFTER', '0: every authenticated request gets a new token (pointless churn). Use e.g. 1d, or leave empty for half of JWT_TTL.');
+  } else if (config.jwtRenewAfterMs !== null) {
+    if (!hasUnit(process.env.JWT_RENEW_AFTER)) {
+      add('warn', 'JWT_RENEW_AFTER', `"${process.env.JWT_RENEW_AFTER}" has no unit and is read as milliseconds. Write e.g. 1d or 12h.`);
+    }
+    // JWT_TTL takes the same shapes jsonwebtoken does ("30d", "12h", a bare number of ms);
+    // a form our parser does not read ("2 days") is simply not compared. Warned, not refused.
+    const ttlMs = parseDurationMs(config.jwtTtl);
+    if (ttlMs !== null && config.jwtRenewAfterMs >= ttlMs) {
+      add('warn', 'JWT_RENEW_AFTER', `${process.env.JWT_RENEW_AFTER} >= JWT_TTL (${config.jwtTtl}): tokens expire before they can be renewed, sliding sessions are OFF.`);
+    }
   }
   if (config.requireAuth && config.allowRegister) {
     add('info', 'ALLOW_REGISTER', 'Open registration while REQUIRE_AUTH is on: anyone can self-create an account.');

@@ -94,8 +94,49 @@ export async function setPlan(user, plan, days, expiresAt) {
 
 export { sanitize };
 
+// `tv` = the user's tokenVersion at signing time. Bumping it (password change, admin
+// reset, disable) invalidates every token issued before. Absent on legacy tokens and
+// legacy users == 0, so tokens issued before this field existed keep working.
 function sign(user) {
-  return jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtTtl });
+  return jwt.sign({ sub: user.id, role: user.role, tv: user.tokenVersion || 0 }, config.jwtSecret, { expiresIn: config.jwtTtl });
+}
+
+// Sign anyone else out: every existing token of this user stops verifying, and so does
+// every TV pairing this user approved but that was not polled yet (an approved pairing is
+// a token in reserve: without this, a thief who approved their own code with the stolen
+// token could still collect a fresh token after the victim changed their password).
+function revokeTokens(user) {
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
+  dropPairingsOf(user.id);
+}
+
+// Verify a raw token and resolve it to { user, payload }, or null when the token is
+// expired/invalid, the user is gone or disabled, or its tokenVersion is stale.
+function resolveToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  try {
+    // Pin the algorithm: the key is an HMAC secret, so only HS256 is ever legitimate.
+    const payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
+    const user = users.find((u) => u.id === payload.sub);
+    if (!user || user.status !== 'active') return null;
+    if ((payload.tv || 0) !== (user.tokenVersion || 0)) return null;
+    return { user, payload };
+  } catch {
+    return null; // invalid/expired: anonymous
+  }
+}
+
+// Sliding session: once a VALID token (verified above -- never an expired, invalid,
+// disabled, deleted or revoked one) is older than the renewal threshold, return a
+// fresh token signed from the user as stored now (role/tokenVersion re-read). A fresh
+// token has a new iat, so at most one renewal happens per threshold. The token is
+// returned to the caller only; it must never reach a log line.
+function renewIfDue(user, payload) {
+  if (typeof payload.iat !== 'number' || typeof payload.exp !== 'number') return null;
+  const lifetimeMs = (payload.exp - payload.iat) * 1000;
+  const threshold = config.jwtRenewAfterMs ?? lifetimeMs / 2;
+  const ageMs = Date.now() - payload.iat * 1000;
+  return ageMs >= threshold ? sign(user) : null;
 }
 
 export async function initAuth() {
@@ -128,18 +169,60 @@ export async function initAuth() {
   }
 }
 
+// Hand a fresh token to THIS response (X-Renewed-Token header + req.renewedToken for
+// handlers that echo it in the body). The only place a token is attached to a response
+// outside login/register/device-poll, so the cache rules live here:
+//  - Cache-Control: no-store -- a response carrying a token must never be stored by the
+//    browser or a proxy. /api/config is identical for everyone (same ETag) and is the
+//    first call of every app start, made with the token: a stored copy carrying user A's
+//    token would be replayed (304 + merged stored headers) to whoever signs in next on
+//    the same browser/TV, and api.ts would adopt A's session.
+//  - Drop the request validators so the handler emits a full 200, never a 304: a 304
+//    makes the browser UPDATE its stored copy with these headers, token included.
+//  - no-store is re-asserted at the last moment (when the headers are flushed): a handler
+//    that sets its own Cache-Control after us must not turn a token-carrying response
+//    into a cacheable one.
+const PRIVATE_NO_STORE = 'private, no-store';
+function handToken(req, res, token) {
+  req.renewedToken = token;
+  delete req.headers['if-none-match'];
+  delete req.headers['if-modified-since'];
+  res.setHeader('Cache-Control', PRIVATE_NO_STORE);
+  res.setHeader('X-Renewed-Token', token);
+  if (!res.__tokenGuard) {
+    res.__tokenGuard = true;
+    const writeHead = res.writeHead;
+    res.writeHead = function guardedWriteHead(...args) {
+      if (this.getHeader('X-Renewed-Token')) this.setHeader('Cache-Control', PRIVATE_NO_STORE);
+      return writeHead.apply(this, args);
+    };
+  }
+}
+
+// Responses that belong to one user (account, preferences, admin, anything that hands a
+// token in its body) must never be stored by a browser or an intermediary cache.
+export function privateNoStore(_req, res, next) {
+  res.setHeader('Cache-Control', PRIVATE_NO_STORE);
+  next();
+}
+
+// The stream proxy relays bytes from third-party CDNs to <video>/hls.js, which never send
+// an Authorization header and never read X-Renewed-Token. Renewing there would only put a
+// token on a response whose caching rules belong to the upstream.
+const isProxyPath = (req) => (req.baseUrl + req.path).startsWith('/api/proxy');
+
 // Express middleware: attaches req.user when a valid token is present.
-export function authenticate(req, _res, next) {
+// When the token is due for renewal, the fresh one rides in the X-Renewed-Token response
+// header (the web client swaps it in) and in req.renewedToken (GET /auth/me echoes it).
+export function authenticate(req, res, next) {
+  if (req.user) return next(); // already resolved by the app-level pass
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  if (token) {
-    try {
-      const payload = jwt.verify(token, config.jwtSecret);
-      const user = users.find((u) => u.id === payload.sub);
-      if (user && user.status === 'active') req.user = user;
-    } catch {
-      /* invalid/expired token: treat as anonymous */
-    }
+  const hit = resolveToken(token);
+  if (hit) {
+    req.user = hit.user;
+    const renewed = isProxyPath(req) ? null : renewIfDue(hit.user, hit.payload);
+    if (renewed) handToken(req, res, renewed);
   }
   next();
 }
@@ -152,14 +235,7 @@ export function requireUser(req, res, next) {
 // Resolve a user from a raw token (used for proxy/segment requests where the
 // browser/hls.js cannot send an Authorization header, so the token rides in ?t=).
 export function userFromToken(token) {
-  if (!token || typeof token !== 'string') return null;
-  try {
-    const payload = jwt.verify(token, config.jwtSecret);
-    const user = users.find((u) => u.id === payload.sub);
-    return user && user.status === 'active' ? user : null;
-  } catch {
-    return null;
-  }
+  return resolveToken(token)?.user || null;
 }
 
 export function requireAdmin(req, res, next) {
@@ -211,6 +287,7 @@ function sanitizePrefs(p) {
 }
 
 export const prefsRouter = Router();
+prefsRouter.use(privateNoStore);
 // Read prefs: any logged-in user (free sees their stored prefs or empty).
 prefsRouter.get('/me/prefs', requireUser, (req, res) => res.json({ prefs: req.user.prefs || null }));
 // Write prefs: premium feature.
@@ -221,6 +298,9 @@ prefsRouter.put('/me/prefs', requirePremium, async (req, res) => {
 });
 
 export const authRouter = Router();
+// Everything under /api/auth is about one account (and login/register/device-poll carry a
+// token in the body): never cacheable.
+authRouter.use(privateNoStore);
 
 authRouter.post('/register', authLimit, async (req, res) => {
   if (!config.allowRegister) return res.status(403).json({ error: 'registration disabled' });
@@ -264,9 +344,11 @@ authRouter.post('/login', authLimit, async (req, res) => {
   res.json({ token: sign(user), user: sanitize(user) });
 });
 
+// Called by the app at every start (web, TV). `token` is present only when the
+// session was just renewed; the client then replaces its stored token.
 authRouter.get('/me', authenticate, (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'not authenticated' });
-  res.json({ user: sanitize(req.user) });
+  res.json({ user: sanitize(req.user), ...(req.renewedToken ? { token: req.renewedToken } : {}) });
 });
 
 // ── Device pairing: log a TV in by scanning a QR with an already-signed-in phone ──
@@ -276,8 +358,12 @@ authRouter.get('/me', authenticate, (req, res) => {
 // goes to whoever holds the secret deviceCode (the TV), so a guessed userCode can't
 // steal a session -- it can at most attach the approver's own account to that TV.
 const PAIR_TTL_MS = 10 * 60 * 1000;
-const pairings = new Map();          // deviceCode -> { userCode, status, userId, expiresAt }
+const pairings = new Map();          // deviceCode -> { userCode, status, userId, tv, expiresAt }
 const pairingByUserCode = new Map(); // userCode   -> deviceCode
+// Called by revokeTokens(): an approved-but-unpolled pairing is a token in reserve.
+function dropPairingsOf(userId) {
+  for (const [dc, p] of pairings) if (p.userId === userId) { pairings.delete(dc); pairingByUserCode.delete(p.userCode); }
+}
 const deviceStartLimit = rateLimit({ windowMs: 60_000, max: 20, name: 'device-start' });
 const devicePollLimit = rateLimit({ windowMs: 60_000, max: 150, name: 'device-poll' });
 const USERCODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L ambiguity
@@ -312,11 +398,13 @@ authRouter.post('/device/poll', devicePollLimit, (req, res) => {
     return res.json({ status: 'expired' });
   }
   if (rec.status !== 'approved') return res.json({ status: 'pending' });
-  // Approved: consume the pairing and hand the TV a fresh token.
+  // Approved: consume the pairing and hand the TV a fresh token -- unless the approver's
+  // session was revoked since (tokenVersion moved): the approval was made with a token
+  // that is dead now, so it must not be convertible into a live one.
   pairings.delete(req.body.deviceCode);
   pairingByUserCode.delete(rec.userCode);
   const user = users.find((u) => u.id === rec.userId);
-  if (!user || user.status !== 'active') return res.json({ status: 'expired' });
+  if (!user || user.status !== 'active' || (user.tokenVersion || 0) !== rec.tv) return res.json({ status: 'expired' });
   res.json({ status: 'approved', token: sign(user), user: sanitize(user) });
 });
 
@@ -336,6 +424,7 @@ authRouter.post('/device/approve', authLimit, authenticate, requireUser, (req, r
   if (rec.status === 'approved') return res.status(409).json({ error: 'code already used' });
   rec.status = 'approved';
   rec.userId = req.user.id;
+  rec.tv = req.user.tokenVersion || 0; // the session generation this approval belongs to
   res.json({ ok: true });
 });
 
@@ -364,12 +453,28 @@ authRouter.put('/multi', authenticate, requireUser, async (req, res) => {
 authRouter.put('/password', authLimit, authenticate, requireUser, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
   if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'new password too short (min 6)' });
-  if (!(await bcrypt.compare(String(currentPassword || ''), req.user.passwordHash))) {
+  const verifiedAgainst = req.user.passwordHash;
+  if (!(await bcrypt.compare(String(currentPassword || ''), verifiedAgainst))) {
     return res.status(401).json({ error: 'current password is incorrect' });
   }
-  req.user.passwordHash = await bcrypt.hash(newPassword, 10);
+  const newHash = await bcrypt.hash(newPassword, 10);
+  // Two devices changing the password at the same instant (or an admin reset landing while
+  // we hashed): the password we verified is no longer the stored one, so this change loses.
+  // Without this, both callers get a 200 and one device believes a password that is not set.
+  if (req.user.passwordHash !== verifiedAgainst) {
+    return res.status(409).json({ error: 'password changed concurrently, sign in again' });
+  }
+  req.user.passwordHash = newHash;
+  // A password change signs every other device out; this device gets a fresh token.
+  revokeTokens(req.user);
+  // Sign right after OUR bump (before the async save): a later bump by someone else (admin
+  // reset racing with us) must leave this token dead, not hand us a token of its generation.
+  // It also replaces the due-for-renewal token authenticate may already have put in the
+  // header (signed before the bump, hence revoked).
+  const fresh = sign(req.user);
   await save();
-  res.json({ ok: true });
+  handToken(req, res, fresh);
+  res.json({ ok: true, token: fresh });
 });
 
 // GDPR: self-service account deletion (password-confirmed). Removes the account
@@ -436,6 +541,14 @@ adminRouter.patch('/users/:id', async (req, res) => {
   if (status && ['active', 'disabled'].includes(status)) user.status = status;
   if (name) user.name = name;
   if (password && password.length >= 6) user.passwordHash = await bcrypt.hash(password, 10);
+  // Disabling or resetting the password also kills the sessions already issued
+  // (re-enabling later requires a fresh login).
+  if (status === 'disabled' || (password && password.length >= 6)) {
+    revokeTokens(user);
+    // An admin resetting their OWN password from the admin panel keeps this device signed
+    // in (same contract as PUT /auth/password). Disabling yourself does sign you out.
+    if (req.user?.id === user.id && user.status === 'active') handToken(req, res, sign(user));
+  }
   await save();
   res.json({ user: sanitize(user) });
 });

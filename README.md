@@ -124,6 +124,7 @@ Copy `.env.example` → `.env`. Key variables (see the example file for the full
 | `HIDE_NSFW` | `true` | Hide adult channels |
 | `REQUIRE_AUTH` | `false` | `true` = account required to watch (SaaS mode) |
 | `JWT_SECRET` | *(dev auto)* | **Set a long random value in production** |
+| `JWT_TTL` / `JWT_RENEW_AFTER` | `7d` / *half of TTL* | Session lifetime; a session that is used past the threshold is renewed silently (TVs stay signed in), an unused one expires |
 | `HEALTH_SWEEP` | `false` | Background availability sweep |
 | `BILLING_PROVIDER` | `mock` | `mock` (instant) or `stripe` |
 | `STRIPE_SECRET` / `STRIPE_PRICE_ID` / `STRIPE_WEBHOOK_SECRET` | — | Real payments (leave empty to use mock) |

@@ -40,6 +40,14 @@ ssh helper-vps 'cd /root/neowatch/server && npm install --omit=dev --no-audit --
 - Prod `.env` holds a strong `JWT_SECRET` (required in prod), `ADMIN_EMAIL=sin.soclose@gmail.com`, a generated `ADMIN_PASSWORD`, `REQUIRE_AUTH=false` (public freemium), `TRUST_PROXY=1`, `BILLING_PROVIDER=mock`. Change the admin password from the account panel after first login.
 - Service: `systemctl {status,restart,stop} neowatch` · logs `tail -f /var/log/neowatch.log`.
 - To gate the whole site to logged-in friends only: set `REQUIRE_AUTH=true` in `/root/neowatch/.env` + restart.
+- Sessions slide: with `JWT_TTL=30d` a device used at least once every 15 days stays signed in for good (set `JWT_RENEW_AFTER=1d` to renew daily instead). `JWT_RENEW_AFTER=0`, a value >= `JWT_TTL`, or a unit-less `JWT_TTL`/`JWT_RENEW_AFTER` (read as milliseconds) are **warned at boot, not refused**: read the boot log after a config change. An unused device still expires at the TTL. There is **no absolute session cap** (owner decision, 06/10/2026). Trade-off to know: a token that keeps being used (including a stolen one) no longer dies at 30 days; **only a password change, an admin password reset or a disable kills it** -- and this is true for every path, including a TV pairing that was approved but not yet polled (it is purged by those three actions, and a poll re-checks the approver's `tokenVersion`).
+- Renewing responses and every user-specific response (`/api/auth/*`, `/api/me/*`, `/api/admin/*`) are `Cache-Control: private, no-store`; a renewing response is never a 304. `/api/proxy` never carries a token (ours or the upstream's).
+- **nginx checklist, BEFORE deploying** (`/etc/nginx/sites-enabled/neowatch.soclose.co`, then `nginx -t`):
+  - no `proxy_cache` (nor `proxy_store`) on the `/api/` location: a cached renewing response would hand one user's token to the next;
+  - no `proxy_hide_header X-Renewed-Token`: the web client needs that header (the body of `GET /auth/me` is the fallback, the other routes have none);
+  - no `proxy_ignore_headers Cache-Control` and no `proxy_hide_header Cache-Control`: the app's `no-store` must reach the browser untouched;
+  - `proxy_buffering off` on `/api/` stays (live HLS).
+  Quick check: `ssh helper-vps 'grep -nE "proxy_cache|proxy_store|proxy_hide_header|proxy_ignore_headers" /etc/nginx/sites-enabled/neowatch.soclose.co'` must print nothing.
 ## Enabling real payments (Stripe) -- code is ready, just add keys
 In `/root/neowatch/.env`: `BILLING_PROVIDER=stripe`, `STRIPE_SECRET=sk_live_...`, `STRIPE_PRICE_ID=price_...` (a recurring price), `STRIPE_WEBHOOK_SECRET=whsec_...`, then `systemctl restart neowatch`.
 - In the Stripe dashboard add a webhook endpoint -> `https://neowatch.soclose.co/api/billing/webhook`, events `checkout.session.completed`, `customer.subscription.deleted`, `customer.subscription.updated`.

@@ -10,7 +10,23 @@
 - [ ] Wire Stripe (keys pending) + real AdSense (client id pending).
 - [ ] Per-user custom sources + client-side `collections` prefs (server field exists).
 - [ ] Unit-test infra (vitest/node:test) to complement the integration suite.
+- [ ] **"Sign out everywhere" button** (bump tokenVersion, hand a fresh token to this device) in the Account panel. Priority since v1.7: it is the only user-side way to kill a stolen token that keeps being used (sliding sessions removed the 30-day hard stop).
+- [ ] Optional absolute session cap (origin `iat` carried over on renewal, e.g. 1 year) -- owner's call.
 - [ ] Favorites roam reconstruction (server stores urls; needs by-url lookup to rebuild on a new device).
+
+## Done (v1.7 -- sliding sessions: TVs and devices stay signed in)
+
+Owner request (06/10): sessions expired every 30 days (JWT_TTL), signing TVs out. Spec written first, tests first (11 red), then code.
+
+- [x] Server: `authenticate` renews a VALID token older than `JWT_RENEW_AFTER` (default: half of the token's own lifetime) -> fresh token in the `X-Renewed-Token` response header (+ `token` field on `GET /auth/me`, the call every app start makes). Never for an expired/invalid token, a deleted or disabled user, or a stale tokenVersion; role re-read from the store; one renewal per threshold (new iat); the token never reaches a log line.
+- [x] Revocation (did not exist): `tokenVersion` per user, claim `tv` in the JWT. Bumped on self password change (response hands this device a fresh token), admin password reset and admin disable. Legacy tokens/users (no field) == 0, so nothing is signed out at deploy.
+- [x] Web: `api.ts` swaps the renewed token on any response (localStorage -> other tabs); `Account.tsx` keeps the fresh token after a password change. Zero change in the auth store.
+- [x] CORS exposes `X-Renewed-Token`; `DATA_DIR`/`CACHE_DIR` env overrides (throwaway test servers); `JWT_RENEW_AFTER` validated at boot.
+- [x] `tasks/session-test.mjs` (60 checks, run with `JWT_TTL=8s JWT_RENEW_AFTER=3s`): active client survives > 2 x TTL, silent client expires, disabled/deleted/garbage never renewed, demoted admin gets `role:user`, password change revokes the other device, TV pairing token slides too, no token in the server log.
+- [x] Security review fixes: (1) BLOCKING -- the browser HTTP cache could replay a stored `X-Renewed-Token` (same ETag on `/api/config` for everyone, 304 merges stored headers) and switch the next user of a shared browser/TV into the previous account: every token-carrying response now goes through `handToken()` = `Cache-Control: no-store` + request validators dropped (full 200, never 304); `api.ts` additionally refuses a handed token for another `sub` or with an older `iat`. (2) `PUT /auth/password` put a pre-revocation token in the header: header == body now. (3) Admin resetting their own password via the admin panel keeps the device signed in. (4) `JWT_RENEW_AFTER=0` / `>= JWT_TTL` warn at boot.
+
+### Review (v1.7)
+Integration suite 66/66, session suite 60/60, browser proofs (built app, Playwright): renewal 8/8 + cache-replay 6/6, adversarial suite 39/39, typecheck + build green. A TV that opens the app at least once per half-TTL (15 days with `JWT_TTL=30d`) stays signed in indefinitely; an unused device still expires at the TTL. Known, accepted trade-off (written in SPEC/DEPLOY/CLAUDE.md): an old token stays valid until its own `exp` after being renewed and can be renewed again, so a stolen token used at least once per threshold lives until `tokenVersion` is bumped -- hence "sign out everywhere" moved up the backlog. Out of scope, said explicitly: no separate refresh token, no absolute session cap.
 
 ## Done (v1.3 -- ultracode audit hardening + completeness)
 

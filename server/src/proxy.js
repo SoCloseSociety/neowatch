@@ -17,6 +17,9 @@ const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
   'te', 'trailers', 'transfer-encoding', 'upgrade', 'content-encoding',
   'content-length',
+  // Ours, never the upstream's: a CDN must not be able to hand our client a "renewed"
+  // session token (the web client adopts that header on same-sub responses).
+  'x-renewed-token',
 ]);
 
 const isPlaylist = (url, ct) => {

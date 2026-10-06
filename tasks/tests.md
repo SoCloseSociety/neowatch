@@ -54,6 +54,7 @@
 - ✅ Atomic + serialized user-store writes
 - ✅ Rate limiting: auth (30/min), health-check (120/min), proxy (3000/min)
 - ⬜ `REQUIRE_AUTH=true` gates catalog/proxy behind login (SaaS mode)
+- ✅ Sliding sessions: a used token is renewed past `JWT_RENEW_AFTER` (`X-Renewed-Token` + `token` on `/auth/me`); unused token expires at TTL; never renewed for expired/invalid/disabled/deleted/revoked; demoted admin gets `role:user`; password change revokes other devices (`tokenVersion`) and hands the fresh token in header AND body; admin self-reset keeps the device signed in; renewing responses are `no-store` and never 304 (no browser-cache replay of another user's token); `JWT_RENEW_AFTER` 0 / >= TTL warn at boot; TV-paired token slides too; a TV pairing approved then kept in reserve dies with the approver's session (password change, admin reset, disable); two simultaneous password changes: exactly one wins (409 for the other); `/api/auth`, `/api/me`, `/api/admin` are `private, no-store`; HS256 pinned; `/api/proxy` never carries a token (ours or the upstream's) -- `tasks/session-test.mjs` (82 checks)
 
 ## 7. Custom sources (M3U) + EPG
 - ✅ Import M3U by URL and by pasted text; parsed + merged into catalog
@@ -81,5 +82,6 @@
 - ⬜ Behind nginx with `REQUIRE_AUTH=true`, strong `JWT_SECRET`, `TRUST_PROXY=1`
 
 ## How to run the automated checks
+- Sliding sessions: start a server with a short lifetime, e.g. `JWT_TTL=8s JWT_RENEW_AFTER=3s PORT=8790 DATA_DIR=/tmp/nw-data CACHE_DIR=/tmp/nw-cache ADMIN_EMAIL=... ADMIN_PASSWORD=... node server/src/index.js`, then `BASE=http://localhost:8790 TTL_S=8 RENEW_S=3 SERVER_LOG=<log> ADMIN_EMAIL=... ADMIN_PASSWORD=... node tasks/session-test.mjs`.
 - API/catalog/monetization/EPG: see the curl + node snippets used during this build (smoke tests).
 - Parser unit check: `node --input-type=module -e "import('./server/src/epg.js').then(...)"`.
