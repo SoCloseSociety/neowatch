@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="no_app_for_link">Aucune app de cet appareil ne peut ouvrir ce lien.</string>
+
+    <string name="w_direct_nom">En direct</string>
+    <string name="w_direct_desc">Les chaînes à l\'antenne maintenant. Touchez-en une pour regarder.</string>
+    <string name="w_direct_titre">En direct</string>
+    <string name="w_mes_nom">Mes chaînes</string>
+    <string name="w_mes_desc">Vos chaînes et ce qui passe maintenant.</string>
+    <string name="w_mes_titre">Mes chaînes</string>
+    <string name="w_chaine_nom">Raccourci chaîne</string>
+    <string name="w_chaine_desc">Une chaîne, une touche pour regarder.</string>
+
+    <string name="w_rafraichir">Actualiser</string>
+    <string name="w_etat_live">Direct</string>
+    <string name="w_etat_hors">Hors antenne</string>
+    <string name="w_etat_inconnu">Non vérifiée</string>
+    <string name="w_verifie">vérifié %1$s</string>
+    <string name="w_age_maintenant">à l\'instant</string>
+    <string name="w_age_min">il y a %1$d min</string>
+    <string name="w_age_h">il y a %1$d h</string>
+    <string name="w_age_j">il y a %1$d j</string>
+    <string name="w_toucher">Touchez pour actualiser</string>
+    <string name="w_chargement">Chargement des chaînes…</string>
+    <string name="w_hors_ligne">NEOWATCH ne répond pas.</string>
+    <string name="w_hors_ligne_garde">Pas de connexion. Voici la dernière liste.</string>
+    <string name="w_refus">Connexion requise. Ouvrez NEOWATCH.</string>
+    <string name="w_inattendu">Réponse inattendue de NEOWATCH.</string>
+    <string name="w_aucune_direct">Aucune chaîne en direct pour l\'instant.</string>
+    <string name="w_aucune_choisie">Aucune chaîne. Appui long sur le widget pour choisir.</string>
+    <string name="w_disparue">Plus dans la liste</string>
+    <string name="w_sans_guide">Pas de guide</string>
+    <string name="w_suite">Ensuite %1$s · %2$s</string>
+    <string name="w_plus">+%1$d de plus</string>
+    <string name="w_premium">Premium</string>
+
+    <string name="w_apercu_rail">Info</string>
+    <string name="w_apercu_prog">Journal du soir</string>
+
+    <string name="w_cfg_titre_direct">Options du direct</string>
+    <string name="w_cfg_titre_mes">Choisissez vos chaînes</string>
+    <string name="w_cfg_titre_chaine">Choisissez une chaîne</string>
+    <string name="w_cfg_sous_direct">Choisissez l\'aspect du widget.</string>
+    <string name="w_cfg_sous_mes">Jusqu\'à 8 chaînes. Un petit widget montre la première.</string>
+    <string name="w_cfg_sous_chaine">Touchez une chaîne pour la choisir.</string>
+    <string name="w_cfg_recherche">Chercher une chaîne</string>
+    <string name="w_cfg_suggestions">Suggestions</string>
+    <string name="w_cfg_resultats">Résultats</string>
+    <string name="w_cfg_choisies">Vos chaînes : %1$d sur 8</string>
+    <string name="w_cfg_choisie">Votre chaîne</string>
+    <string name="w_cfg_retirer">Touchez une chaîne pour la retirer.</string>
+    <string name="w_cfg_aucun_resultat">Aucune chaîne trouvée.</string>
+    <string name="w_cfg_recherche_en_cours">Recherche…</string>
+    <string name="w_cfg_erreur">Pas de connexion. Réessayez.</string>
+    <string name="w_cfg_complet">Déjà 8 chaînes. Retirez-en une d\'abord.</string>
+    <string name="w_cfg_choisir_une">Choisissez au moins une chaîne.</string>
+    <string name="w_cfg_style">Style</string>
+    <string name="w_style_lunaire">Lunaire</string>
+    <string name="w_style_doux">Doux</string>
+    <string name="w_style_verre">Verre</string>
+    <string name="w_cfg_logos">Logos des chaînes</string>
+    <string name="w_logos_oui">Montrer les logos</string>
+    <string name="w_logos_non">Lettres seulement</string>
+    <string name="w_cfg_valider">Terminé</string>
+
+    <!-- Home rail names, by rail key (same keys as server HOME_RAILS), in the device language. -->
+    <string name="w_rail_foot">Football &amp; Sport</string>
+    <string name="w_rail_fr">France</string>
+    <string name="w_rail_uk">Royaume-Uni</string>
+    <string name="w_rail_de">Allemagne</string>
+    <string name="w_rail_it">Italie</string>
+    <string name="w_rail_es">Espagne</string>
+    <string name="w_rail_news">Info en direct</string>
+    <string name="w_rail_movies">Films</string>
+    <string name="w_rail_series">Séries</string>
+    <string name="w_rail_kids">Enfants</string>
+    <string name="w_rail_music">Musique</string>
+    <string name="w_rail_documentary">Documentaires</string>
+    <string name="w_rail_entertainment">Divertissement</string>
+    <string name="w_rail_general">Généralistes</string>
+</resources>

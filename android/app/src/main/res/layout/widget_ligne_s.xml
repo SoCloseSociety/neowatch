@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One channel row in the narrow S size: the name gets the whole width, the state (a red point +
+     LIVE, or a word) goes UNDER it. Measured on the emulator: with the state on the right, a 2x2
+     left three letters of the name. Same ids as widget_ligne (w_l_sous stays hidden here). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_l_racine"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:minHeight="30dp"
+    android:orientation="horizontal"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
+
+    <FrameLayout
+        android:id="@+id/w_l_plaque"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:background="@drawable/w_plaque">
+
+        <ImageView
+            android:id="@+id/w_l_logo"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@null"
+            android:padding="2dp"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/w_l_mono"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fontFamily="@font/plex_mono_medium"
+            android:gravity="center"
+            android:maxLines="1"
+            android:textColor="@color/w_texte2"
+            android:textSize="12sp" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/w_l_nom"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="@font/plex_sans"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="@color/w_texte"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/w_l_point"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_marginEnd="5dp"
+                android:contentDescription="@null"
+                android:src="@drawable/w_point"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/w_l_etat"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="@font/plex_mono_medium"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:textAllCaps="true"
+                android:textColor="@color/w_texte2"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/w_l_sous"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:visibility="gone" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

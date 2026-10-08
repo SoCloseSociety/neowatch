@@ -1,13 +1,14 @@
-# NEOWATCH for Android TV -- WebView shell (v2.0.0)
+# NEOWATCH for Android TV -- WebView shell (v2.1.0)
 
 A minimal native Android app that shows `https://neowatch.soclose.co` full-screen in the
 device's **system WebView**. One Activity (`LauncherActivity.java`), zero third-party
-dependencies, a ~120 kB APK.
+dependencies, a ~250 kB APK. Since v2.1.0 it also carries three **phone home-screen widgets**
+(see "Home-screen widgets" below); nothing changes on a TV.
 
 - Package: **`co.soclose.neowatch.twa`** (FROZEN: Sentinel House launches the app by this
   package, and `web/public/.well-known/assetlinks.json` is bound to it). The `.twa` suffix is
   historical; the app is no longer a TWA.
-- versionCode **3**, versionName **2.0.0**, minSdk 23, targetSdk 34, compileSdk 35.
+- versionCode **4**, versionName **2.1.0** (v2.0.0 was versionCode 3), minSdk 23, targetSdk 34, compileSdk 35.
 - Signed with the **existing** NEOWATCH key (alias `my-key-alias`, SHA-256
   `C8:6E:CD:...:F2:61`), so it installs over v1/v2 and the verified deep links keep working.
 
@@ -53,6 +54,64 @@ Web-app finding from that run (not a shell issue): on a `/chaine/<id>` page the 
 on the **Regarder** button (Down goes from the logo straight to the "Chaines similaires" row, Up
 goes back to the top bar). This is the "fiche_ok_a_donner" limit Sentinel House already knows about.
 
+## Home-screen widgets (v2.1.0, phones)
+
+Three widgets, built from the **Sentinel House widget kit** (SentinelHouse `feat/jarvis-v3`,
+`08-sentinel-home/apps/android/KIT-WIDGETS.md`, same organisation, adapted with attribution in
+each file) in the Sentinel **Lunaire** language: dark card, IBM Plex Sans + Mono (fonts copied
+from the kit, OFL), one mint accent for a fresh read only, a red point + the word LIVE, honest
+states with their age. Styles per widget: **Lunar** (default), **Soft** (light, Doux tokens),
+**Glass** (translucent); logos or letters only. Strings in EN / FR / RU (device language).
+
+| Widget | Sizes | Reads (PUBLIC routes only) | Tap |
+|---|---|---|---|
+| **Live now** | S / M / L (3 / 3 / 8 channels) | `GET /api/catalog/home?lang=en\|fr\|ru` -> `featured[]`, then the first rail (online first) | a channel -> `/chaine/<id>?play=1`; the title -> home |
+| **My channels** | S = 1 (large card with now / next), M = 4, L = 8 | per channel `GET /api/catalog/channel/<id>?channelId=<tvg-id>` (adopts `canonicalId`), then `GET /api/epg/now?ids=...` | same |
+| **Channel shortcut** | 1x1 | `GET /api/catalog/channel/<id>?channelId=` | `/chaine/<id>?play=1` |
+
+- **Options screen** (`WidgetConfigActivity`): opens when a widget is placed and on a long press
+  ("Widget settings"). Search = `GET /api/catalog/channels?q=<text>&limit=20` (empty = live
+  suggestions); "My channels" keeps up to 8 picks, the shortcut one. Stored per widget in
+  SharedPreferences `neowatch_widgets`: `id + channelId + name`, style, logos. Never a token.
+- **Taps**: an explicit intent to `LauncherActivity`, `ACTION_VIEW` with the URL as data (only
+  `https://neowatch.soclose.co/` or `/chaine/<id>?play=1`; ids validated). The refresh icon and
+  the footer refresh through `WidgetActions` (not exported). No purchase, cancel, TV pairing,
+  sign-in/out, account, admin action; no `/api/proxy` link, stream URL or JWT is ever stored
+  (`Widgets.compacter` keeps an allowlist of fields).
+- **Honest states**: `Loading channels...`, `NEOWATCH is not answering.`, `No connection. This is
+  the last list.` (grey, LIVE no longer red), `Sign-in needed. Open NEOWATCH.` (401/403),
+  `Off air`, `Not checked` (server verdict unknown), `No guide`, `No longer listed` (404),
+  footer `checked N min ago` with a mint point only while the read is fresh (< 35 min).
+- **Refresh** (the kit's mechanism, no WorkManager): `updatePeriodMillis` = 30 min, each update
+  schedules a `JobScheduler` job (`WidgetJob`, network off the main thread, 3 s / 6 s timeouts,
+  512 KB cap, no redirects); a manual refresh tap. A non-wakeup inexact alarm (RTC, 1 min)
+  only REDRAWS (no network) so "checked N min ago" stays true; it never wakes the phone and
+  stops with the last widget. The kit has no "screen off" rule, so none was added.
+- **Logos**: fetched in the job (https only, 300 KB, reduced to 80 px PNG in app files, kept
+  7 days, a failure retried after a day); an SVG or a dead host shows the two-letter monogram.
+- **Static check**: `python3 -I android/tools/check_widgets.py` (port of the kit's
+  `tests/test_widgets_android.py`): only RemoteViews-safe views in widget layouts (a bare
+  `<View>` = "Can't load widget"), ids used by the code exist, previews exist, period >= 30 min,
+  receivers wired and the tap receiver / job not exported, EN/FR/RU keys and format args equal,
+  widget sentences <= 12 words, no em dash under `android/`, widget code reads only the four
+  public routes and never a token / proxy / auth / billing / pairing route.
+- **Android TV**: the leanback launcher hosts no widgets, so the providers simply never run.
+
+Measured on an API 34 Pixel emulator (08/10/2026): the three widgets place, read and draw in
+S / M / L, Lunar and Soft, EN / FR / RU; channel taps open `/chaine/<id>?play=1` in the shell
+(cold and warm), the title opens the home page; offline shows the kept list greyed with its age.
+Two findings that shaped the code: (1) a **never-opened app sits in the NEVER standby bucket**
+and JobScheduler runs none of its jobs, so every widget opens its options screen when placed
+(that makes the app active and the first read runs); (2) on a 2x2 the state had to go under the
+name (`widget_ligne_s.xml`), and L (8 rows) needs about 360 dp of height.
+
+Server notes seen while testing (not shell issues): the deployed `/api/catalog/home?lang=en`
+returns French rail titles (the widget names the rails itself, by rail key); the deployed
+`/api/catalog/channel/<id>` has no `canonicalId` / `checkedAt` yet and its `?channelId=`
+fallback answers 404 (the widget handles both: it adopts the id the server returns, and a 404
+reads "No longer listed"); `/api/epg/now` sometimes returns `next` equal to `now` (the widget
+then shows no "Next" line).
+
 ## Build
 
 Toolchain: JDK 17, Android SDK (`platforms;android-35`, `build-tools;35.0.0`), Gradle 8.11.1 via
@@ -88,8 +147,10 @@ APK=app/build/outputs/apk/release/app-release.apk
 $BT/apksigner verify --print-certs $APK | grep SHA-256
 #   must equal (lowercase, no colons) the fingerprint in web/public/.well-known/assetlinks.json:
 #   c86ecdaa204c1161ae1d72b7378a0d4de545370e07284eb1eb164feac9e8f261
-$BT/aapt2 dump badging $APK | grep -E "package:|launchable-activity|banner"
-#   package co.soclose.neowatch.twa versionCode 3, launchable-activity AND
+$BT/aapt2 dump badging $APK | grep -E "package:|launchable-activity|banner|app-widget|receivers"
+#   provides-component:'app-widget' and other-receivers (the 3 widget providers + WidgetActions)
+python3 -I tools/check_widgets.py     # static check of the widgets, must print OK
+#   package co.soclose.neowatch.twa versionCode 4, launchable-activity AND
 #   leanback-launchable-activity = co.soclose.neowatch.twa.LauncherActivity, banner present
 ```
 
@@ -112,6 +173,16 @@ Icons/banner are generated from `web/public/icon-512.png`: `python3 -I android/t
      The `fiche_ok_a_donner` limit is a web-app question, unchanged by the shell.
    - Optional: Sentinel can read the installed version (`dumpsys package co.soclose.neowatch.twa`
      -> `versionCode=3`) to tell a TWA (1-2) from the shell (3+).
+
+## Test checklist (on a real phone, widgets, by the owner)
+
+- [ ] **Install over 2.0.0**: `adb install -r neowatch-2.1.0.apk` succeeds; `versionCode=4`.
+- [ ] Long press the home screen -> Widgets -> NEOWATCH: three widgets with a preview.
+- [ ] Place **Live now**: the options open, Done, channels appear with LIVE within seconds.
+- [ ] Place **My channels**, search, pick 4+, Done: names, now playing, OFF AIR / No guide words.
+- [ ] Place **Channel shortcut**: logo + LIVE; a tap opens the channel in NEOWATCH and plays.
+- [ ] Resize (2x2, 4x2, 4x4): S / M / L drawings; long press -> Widget settings: change picks and style.
+- [ ] Airplane mode + refresh: "No connection. This is the last list." and the age keeps counting.
 
 ## Test checklist (on a real TV, by the owner)
 

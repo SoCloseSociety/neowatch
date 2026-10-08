@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="no_app_for_link">На этом устройстве нет приложения для этой ссылки.</string>
+
+    <string name="w_direct_nom">Сейчас в эфире</string>
+    <string name="w_direct_desc">Каналы в эфире прямо сейчас. Нажмите, чтобы смотреть.</string>
+    <string name="w_direct_titre">Сейчас в эфире</string>
+    <string name="w_mes_nom">Мои каналы</string>
+    <string name="w_mes_desc">Ваши каналы и что идёт сейчас.</string>
+    <string name="w_mes_titre">Мои каналы</string>
+    <string name="w_chaine_nom">Ярлык канала</string>
+    <string name="w_chaine_desc">Один канал, одно касание до просмотра.</string>
+
+    <string name="w_rafraichir">Обновить</string>
+    <string name="w_etat_live">Эфир</string>
+    <string name="w_etat_hors">Не в эфире</string>
+    <string name="w_etat_inconnu">Не проверено</string>
+    <string name="w_verifie">проверено %1$s</string>
+    <string name="w_age_maintenant">только что</string>
+    <string name="w_age_min">%1$d мин назад</string>
+    <string name="w_age_h">%1$d ч назад</string>
+    <string name="w_age_j">%1$d дн. назад</string>
+    <string name="w_toucher">Нажмите, чтобы обновить</string>
+    <string name="w_chargement">Загрузка каналов…</string>
+    <string name="w_hors_ligne">NEOWATCH не отвечает.</string>
+    <string name="w_hors_ligne_garde">Нет связи. Это последний список.</string>
+    <string name="w_refus">Нужен вход. Откройте NEOWATCH.</string>
+    <string name="w_inattendu">Неожиданный ответ от NEOWATCH.</string>
+    <string name="w_aucune_direct">Сейчас нет каналов в эфире.</string>
+    <string name="w_aucune_choisie">Каналов нет. Удерживайте виджет, чтобы выбрать.</string>
+    <string name="w_disparue">Больше нет в списке</string>
+    <string name="w_sans_guide">Нет программы</string>
+    <string name="w_suite">Далее %1$s · %2$s</string>
+    <string name="w_plus">ещё %1$d</string>
+    <string name="w_premium">Премиум</string>
+
+    <string name="w_apercu_rail">Новости</string>
+    <string name="w_apercu_prog">Вечерние новости</string>
+
+    <string name="w_cfg_titre_direct">Настройки эфира</string>
+    <string name="w_cfg_titre_mes">Выберите каналы</string>
+    <string name="w_cfg_titre_chaine">Выберите канал</string>
+    <string name="w_cfg_sous_direct">Выберите вид виджета.</string>
+    <string name="w_cfg_sous_mes">До 8 каналов. Маленький виджет показывает первый.</string>
+    <string name="w_cfg_sous_chaine">Нажмите на канал, чтобы выбрать его.</string>
+    <string name="w_cfg_recherche">Найти канал</string>
+    <string name="w_cfg_suggestions">Подсказки</string>
+    <string name="w_cfg_resultats">Результаты</string>
+    <string name="w_cfg_choisies">Ваши каналы: %1$d из 8</string>
+    <string name="w_cfg_choisie">Ваш канал</string>
+    <string name="w_cfg_retirer">Нажмите на канал, чтобы убрать его.</string>
+    <string name="w_cfg_aucun_resultat">Каналы не найдены.</string>
+    <string name="w_cfg_recherche_en_cours">Поиск…</string>
+    <string name="w_cfg_erreur">Нет связи. Попробуйте снова.</string>
+    <string name="w_cfg_complet">Уже 8 каналов. Сначала уберите один.</string>
+    <string name="w_cfg_choisir_une">Выберите хотя бы один канал.</string>
+    <string name="w_cfg_style">Стиль</string>
+    <string name="w_style_lunaire">Лунный</string>
+    <string name="w_style_doux">Мягкий</string>
+    <string name="w_style_verre">Стекло</string>
+    <string name="w_cfg_logos">Логотипы каналов</string>
+    <string name="w_logos_oui">Показывать логотипы</string>
+    <string name="w_logos_non">Только буквы</string>
+    <string name="w_cfg_valider">Готово</string>
+
+    <!-- Home rail names, by rail key (same keys as server HOME_RAILS), in the device language. -->
+    <string name="w_rail_foot">Футбол и спорт</string>
+    <string name="w_rail_fr">Франция</string>
+    <string name="w_rail_uk">Великобритания</string>
+    <string name="w_rail_de">Германия</string>
+    <string name="w_rail_it">Италия</string>
+    <string name="w_rail_es">Испания</string>
+    <string name="w_rail_news">Новости в эфире</string>
+    <string name="w_rail_movies">Фильмы</string>
+    <string name="w_rail_series">Сериалы</string>
+    <string name="w_rail_kids">Детям</string>
+    <string name="w_rail_music">Музыка</string>
+    <string name="w_rail_documentary">Документальные</string>
+    <string name="w_rail_entertainment">Развлечения</string>
+    <string name="w_rail_general">Популярные каналы</string>
+</resources>

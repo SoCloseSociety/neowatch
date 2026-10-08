@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The logo plate (bg-3), like the web channel card: a logo centred on it, or a monogram. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/w_plaque" />
+    <corners android:radius="8dp" />
+</shape>

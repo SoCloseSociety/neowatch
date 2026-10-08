@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Channel shortcut" (1x1): the logo plate and one state word under it (a red point + LIVE, or
+     OFF AIR). Tap: the channel page, playing. Adapted from the kit's widget_raccourci.xml. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_racine"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/w_fond"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="2dp">
+
+    <FrameLayout
+        android:id="@+id/w_l_plaque"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:background="@drawable/w_plaque">
+
+        <ImageView
+            android:id="@+id/w_l_logo"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@null"
+            android:padding="4dp"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/w_l_mono"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fontFamily="@font/plex_mono_medium"
+            android:gravity="center"
+            android:maxLines="1"
+            android:textColor="@color/w_texte2"
+            android:textSize="14sp" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/w_l_point"
+            android:layout_width="6dp"
+            android:layout_height="6dp"
+            android:layout_marginEnd="4dp"
+            android:contentDescription="@null"
+            android:src="@drawable/w_point"
+            android:visibility="gone" />
+
+        <!-- Sans, not mono, and two lines: measured on the emulator, the FR "DIRECT" was cut to
+             "DIRE..." in a 1x1, and "HORS ANTENNE" / "НЕ В ЭФИРЕ" need a second line. -->
+        <TextView
+            android:id="@+id/w_l_etat"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="@font/plex_sans"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:maxLines="2"
+            android:textAllCaps="true"
+            android:textColor="@color/w_texte2"
+            android:textSize="12sp" />
+    </LinearLayout>
+</LinearLayout>

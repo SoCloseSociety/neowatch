@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget dimensions, from the Sentinel House widget kit (KIT-WIDGETS.md): 16 dp card radius,
+     12 / 8 dp margins. NEOWATCH floor: no widget text under 12 sp. -->
+<resources>
+    <dimen name="w_rayon">16dp</dimen>
+    <dimen name="w_marge">12dp</dimen>
+    <dimen name="w_marge_s">8dp</dimen>
+    <dimen name="w_plaque">28dp</dimen>
+    <dimen name="w_plaque_hero">44dp</dimen>
+</resources>

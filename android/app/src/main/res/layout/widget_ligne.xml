@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One channel row of a widget (WidgetRendu adds as many as the size shows): the logo plate (a logo
+     or a monogram), the name and an optional second line (programme, rail), then the state: a red
+     point + LIVE, or a word (OFF AIR, NOT CHECKED). A word, never a colour alone. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_l_racine"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:minHeight="30dp"
+    android:orientation="horizontal"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
+
+    <FrameLayout
+        android:id="@+id/w_l_plaque"
+        android:layout_width="@dimen/w_plaque"
+        android:layout_height="@dimen/w_plaque"
+        android:background="@drawable/w_plaque">
+
+        <ImageView
+            android:id="@+id/w_l_logo"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@null"
+            android:padding="3dp"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/w_l_mono"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fontFamily="@font/plex_mono_medium"
+            android:gravity="center"
+            android:maxLines="1"
+            android:textColor="@color/w_texte2"
+            android:textSize="12sp" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/w_l_nom"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="@font/plex_sans"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="@color/w_texte"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/w_l_sous"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:fontFamily="@font/plex_sans"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="@color/w_texte2"
+            android:textSize="12sp"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/w_l_point"
+        android:layout_width="6dp"
+        android:layout_height="6dp"
+        android:layout_marginStart="6dp"
+        android:layout_marginEnd="5dp"
+        android:contentDescription="@null"
+        android:src="@drawable/w_point"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/w_l_etat"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="2dp"
+        android:ellipsize="end"
+        android:fontFamily="@font/plex_mono_medium"
+        android:maxLines="1"
+        android:maxWidth="104dp"
+        android:textAllCaps="true"
+        android:textColor="@color/w_texte2"
+        android:textSize="12sp" />
+</LinearLayout>

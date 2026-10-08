@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Channel shortcut" widget (1x1, not resizable): one channel picked when it is placed. Adapted
+     from the kit's xml/widget_raccourci.xml. 30 min period, the state word is re-read then. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="40dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="40dp"
+    android:minResizeHeight="40dp"
+    android:targetCellWidth="1"
+    android:targetCellHeight="1"
+    android:maxResizeWidth="40dp"
+    android:maxResizeHeight="40dp"
+    android:resizeMode="none"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_chaine"
+    android:previewLayout="@layout/widget_apercu_chaine"
+    android:description="@string/w_chaine_desc"
+    android:widgetCategory="home_screen"
+    android:widgetFeatures="reconfigurable"
+    android:configure="co.soclose.neowatch.twa.WidgetConfigActivity" />

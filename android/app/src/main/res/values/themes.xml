@@ -9,4 +9,14 @@
         <item name="android:navigationBarColor">@color/bg</item>
         <item name="android:windowContentOverlay">@null</item>
     </style>
+
+    <!-- Widget options screen (phones): dark, with the status bar, not fullscreen. -->
+    <style name="Theme.NeoWatch.Options" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:colorBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:colorAccent">@color/w_os</item>
+        <item name="android:textColorHighlight">#5597A6B2</item>
+    </style>
 </resources>

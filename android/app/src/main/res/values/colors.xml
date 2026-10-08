@@ -1,4 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="bg">#FF05070A</color>
+
+    <!-- Home-screen widgets (v2.1.0). Sentinel Lunaire tokens, the same values as
+         web/src/index.css (charte.css): bg-1/bg-2/bg-3, t1/t2, line, mint, red.
+         Rule: mint = the OK state only (a fresh read), red = LIVE only, never a fill. -->
+    <color name="w_fond">#FF05070A</color>
+    <color name="w_surface">#FF0A0D10</color>
+    <color name="w_plaque">#FF121922</color>
+    <color name="w_ligne">#FF1E2731</color>
+    <color name="w_texte">#FFE9EEF2</color>
+    <color name="w_texte2">#FF97A6B2</color>
+    <color name="w_menthe">#FF34E5A0</color>
+    <color name="w_live">#FFFF5E5E</color>
+    <!-- Doux (light) style: the Doux tokens of charte.css. AA: t1 on bg-1 14.9:1, t2 6.6:1. -->
+    <color name="w_doux_surface">#FFF8F3E9</color>
+    <color name="w_doux_plaque">#FFEFE6D6</color>
+    <color name="w_doux_ligne">#FFE2D9CB</color>
+    <color name="w_doux_texte">#FF27221D</color>
+    <color name="w_doux_texte2">#FF5A524A</color>
+    <color name="w_doux_menthe">#FF0B7556</color>
+    <color name="w_doux_live">#FFC03A2B</color>
+    <!-- Glass style: the Lunaire background at 72 %, a light 20 % line; Lunaire inks stay. -->
+    <color name="w_verre_fond">#B805070A</color>
+    <color name="w_verre_ligne">#33FFFFFF</color>
+    <!-- Configuration screen: the bone primary (selected choice) and its ink. -->
+    <color name="w_os">#FFE9EEF2</color>
+    <color name="w_os_encre">#FF0A0D10</color>
 </resources>

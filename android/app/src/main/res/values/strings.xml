@@ -1,5 +1,88 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">NEOWATCH</string>
+    <string name="app_name" translatable="false">NEOWATCH</string>
     <string name="no_app_for_link">No app on this device can open that link.</string>
+
+    <!-- Home-screen widgets (v2.1.0). Short sentences (12 words max), no jargon, no em dash. -->
+    <string name="w_direct_nom">Live now</string>
+    <string name="w_direct_desc">Channels on air right now. Tap one to watch.</string>
+    <string name="w_direct_titre">Live now</string>
+    <string name="w_mes_nom">My channels</string>
+    <string name="w_mes_desc">Your channels and what is on now.</string>
+    <string name="w_mes_titre">My channels</string>
+    <string name="w_chaine_nom">Channel shortcut</string>
+    <string name="w_chaine_desc">One channel, one tap to watch.</string>
+
+    <string name="w_rafraichir">Refresh</string>
+    <string name="w_etat_live">Live</string>
+    <string name="w_etat_hors">Off air</string>
+    <string name="w_etat_inconnu">Not checked</string>
+    <string name="w_verifie">checked %1$s</string>
+    <string name="w_age_maintenant">just now</string>
+    <string name="w_age_min">%1$d min ago</string>
+    <string name="w_age_h">%1$d h ago</string>
+    <string name="w_age_j">%1$d d ago</string>
+    <string name="w_toucher">Tap to refresh</string>
+    <string name="w_chargement">Loading channels…</string>
+    <string name="w_hors_ligne">NEOWATCH is not answering.</string>
+    <string name="w_hors_ligne_garde">No connection. This is the last list.</string>
+    <string name="w_refus">Sign-in needed. Open NEOWATCH.</string>
+    <string name="w_inattendu">Unexpected answer from NEOWATCH.</string>
+    <string name="w_aucune_direct">No live channel right now.</string>
+    <string name="w_aucune_choisie">No channel yet. Hold the widget to pick some.</string>
+    <string name="w_disparue">No longer listed</string>
+    <string name="w_sans_guide">No guide</string>
+    <string name="w_suite">Next %1$s · %2$s</string>
+    <string name="w_plus">+%1$d more</string>
+    <string name="w_premium">Premium</string>
+
+    <!-- Picker previews: sample channel names only. -->
+    <string name="w_apercu_1" translatable="false">France 24</string>
+    <string name="w_apercu_2" translatable="false">Euronews</string>
+    <string name="w_apercu_3" translatable="false">NASA TV</string>
+    <string name="w_apercu_rail">News</string>
+    <string name="w_apercu_prog">Evening news</string>
+
+    <!-- Widget options screen. -->
+    <string name="w_cfg_titre_direct">Live now options</string>
+    <string name="w_cfg_titre_mes">Pick your channels</string>
+    <string name="w_cfg_titre_chaine">Pick one channel</string>
+    <string name="w_cfg_sous_direct">Choose how the widget looks.</string>
+    <string name="w_cfg_sous_mes">Up to 8 channels. A small widget shows the first one.</string>
+    <string name="w_cfg_sous_chaine">Tap a channel to pick it.</string>
+    <string name="w_cfg_recherche">Search a channel</string>
+    <string name="w_cfg_suggestions">Suggestions</string>
+    <string name="w_cfg_resultats">Results</string>
+    <string name="w_cfg_choisies">Your channels: %1$d of 8</string>
+    <string name="w_cfg_choisie">Your channel</string>
+    <string name="w_cfg_retirer">Tap a channel to remove it.</string>
+    <string name="w_cfg_aucun_resultat">No channel found.</string>
+    <string name="w_cfg_recherche_en_cours">Searching…</string>
+    <string name="w_cfg_erreur">No connection. Try again.</string>
+    <string name="w_cfg_complet">8 channels already. Remove one first.</string>
+    <string name="w_cfg_choisir_une">Pick at least one channel.</string>
+    <string name="w_cfg_style">Style</string>
+    <string name="w_style_lunaire">Lunar</string>
+    <string name="w_style_doux">Soft</string>
+    <string name="w_style_verre">Glass</string>
+    <string name="w_cfg_logos">Channel logos</string>
+    <string name="w_logos_oui">Show logos</string>
+    <string name="w_logos_non">Letters only</string>
+    <string name="w_cfg_valider">Done</string>
+
+    <!-- Home rail names, by rail key (same keys as server HOME_RAILS), in the device language. -->
+    <string name="w_rail_foot">Football &amp; Sport</string>
+    <string name="w_rail_fr">France</string>
+    <string name="w_rail_uk">United Kingdom</string>
+    <string name="w_rail_de">Germany</string>
+    <string name="w_rail_it">Italy</string>
+    <string name="w_rail_es">Spain</string>
+    <string name="w_rail_news">Live news</string>
+    <string name="w_rail_movies">Movies</string>
+    <string name="w_rail_series">Series</string>
+    <string name="w_rail_kids">Kids</string>
+    <string name="w_rail_music">Music</string>
+    <string name="w_rail_documentary">Documentaries</string>
+    <string name="w_rail_entertainment">Entertainment</string>
+    <string name="w_rail_general">Popular channels</string>
 </resources>

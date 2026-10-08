@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A NEOWATCH widget card (sizes M and L). Adapted from the Sentinel House widget kit (widget_cadre_*.xml):
+     header (title + refresh), rows added one by one (WidgetRendu), an honest state line, a dated
+     footer. RemoteViews only inflates a closed list of views: never a bare View here
+     (android/tools/check_widgets.py checks it). Text floor 12 sp. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_racine"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/w_fond">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="4dp"
+        android:paddingBottom="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:minHeight="32dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/w_titre"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:fontFamily="@font/plex_mono_medium"
+                android:gravity="center_vertical"
+                android:letterSpacing="0.1"
+                android:maxLines="1"
+                android:textAllCaps="true"
+                android:textColor="@color/w_texte2"
+                android:textSize="12sp" />
+
+            <ImageView
+                android:id="@+id/w_rafraichir"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:contentDescription="@string/w_rafraichir"
+                android:padding="7dp"
+                android:src="@drawable/ic_w_rafraichir" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/w_lignes"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="12dp"
+            android:orientation="vertical" />
+
+        <TextView
+            android:id="@+id/w_statut"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="12dp"
+            android:ellipsize="end"
+            android:fontFamily="@font/plex_sans"
+            android:maxLines="2"
+            android:textColor="@color/w_texte2"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/w_pied"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:layout_marginEnd="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/w_frais"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_marginEnd="6dp"
+                android:contentDescription="@null"
+                android:src="@drawable/w_point"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/w_pied_texte"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:fontFamily="@font/plex_mono"
+                android:maxLines="1"
+                android:textColor="@color/w_texte2"
+                android:textSize="12sp" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

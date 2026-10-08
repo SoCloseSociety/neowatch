@@ -48,5 +48,65 @@
                 <data android:host="neowatch.soclose.co" />
             </intent-filter>
         </activity>
+
+        <!-- HOME-SCREEN WIDGETS (v2.1.0, phones). Adapted from the Sentinel House widget kit.
+             The three providers are exported by necessity (the launcher sends them
+             APPWIDGET_UPDATE); they only DRAW from a cache and ask WidgetJob for a read, and read
+             no extra. Taps open a NEOWATCH page in LauncherActivity (explicit intent) or go to
+             WidgetActions (NOT exported: refresh + redraw tick only). The options screen is opened
+             by the launcher (APPWIDGET_CONFIGURE) and stores channel ids, never a token.
+             Android TV: the leanback launcher hosts no widgets, so none of this runs there. -->
+        <receiver
+            android:name=".WidgetDirect"
+            android:exported="true"
+            android:label="@string/w_direct_nom">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_direct" />
+        </receiver>
+        <receiver
+            android:name=".WidgetMesChaines"
+            android:exported="true"
+            android:label="@string/w_mes_nom">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_mes_chaines" />
+        </receiver>
+        <receiver
+            android:name=".WidgetChaine"
+            android:exported="true"
+            android:label="@string/w_chaine_nom">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_chaine" />
+        </receiver>
+        <receiver
+            android:name=".WidgetActions"
+            android:exported="false" />
+        <service
+            android:name=".WidgetJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <activity
+            android:name=".WidgetConfigActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:taskAffinity=""
+            android:theme="@style/Theme.NeoWatch.Options"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

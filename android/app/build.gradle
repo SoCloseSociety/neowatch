@@ -43,8 +43,8 @@ android {
         applicationId "co.soclose.neowatch.twa"
         minSdk 23
         targetSdk 34
-        versionCode 3
-        versionName "2.0.0"
+        versionCode 4
+        versionName "2.1.0"
     }
 
     signingConfigs {
@@ -91,4 +91,5 @@ gradle.taskGraph.whenReady { graph ->
     }
 }
 
-// Zero dependencies: the shell is plain android.webkit.WebView (the TV's system WebView).
+// Zero dependencies: the shell is plain android.webkit.WebView (the TV's system WebView), and the
+// phone home-screen widgets (v2.1.0) use only the framework (AppWidgetProvider, JobScheduler).
