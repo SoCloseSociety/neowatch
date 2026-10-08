@@ -108,13 +108,22 @@ async function deepProbe(url, headers, allowPrivate) {
   }
 }
 
+// Hard cap on a whole probe (a deep probe chains 3 requests of TIMEOUT_MS each): one
+// request that never settles must not hold a sweep worker, and so the sweep, forever.
+const PROBE_MAX_MS = 4 * TIMEOUT_MS;
+const capped = (p) => {
+  let t;
+  return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(Object.assign(new Error('probe cap'), { name: 'AbortError' })), PROBE_MAX_MS); })])
+    .finally(() => clearTimeout(t));
+};
+
 async function probe(url, ua, ref, deep = false) {
   const headers = { 'User-Agent': ua || 'Mozilla/5.0 (NEOWATCH)' };
   if (ref) headers['Referer'] = ref;
   const t0 = performance.now();
   const allowPrivate = lanOk(url);
   try {
-    const r = deep ? await deepProbe(url, headers, allowPrivate) : await shallowProbe(url, headers, allowPrivate);
+    const r = await capped(deep ? deepProbe(url, headers, allowPrivate) : shallowProbe(url, headers, allowPrivate));
     return { online: r.online, status: r.status, ms: Math.round(performance.now() - t0), checkedAt: Date.now(), deep };
   } catch (e) {
     return { online: false, status: String(e?.name === 'AbortError' ? 'timeout' : 'error'), ms: Math.round(performance.now() - t0), checkedAt: Date.now(), deep };
@@ -201,10 +210,17 @@ const SWEEP_PAUSE_MS = 1200;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sweepPause = () => sleep(SWEEP_PAUSE_MS + Math.floor(Math.random() * 400) - 200);
 let sweeping = false;
+let sweepStartedAt = 0;
+let sweepGen = 0;
+// A pass over ~18k streams takes about 2h; one still "running" after 3h is stuck.
+const SWEEP_STUCK_MS = 3 * 3600 * 1000;
 
 export async function runSweep(force = false, deep = false) {
-  if (sweeping) return { started: false, reason: 'already running' };
+  if (sweeping && Date.now() - sweepStartedAt < SWEEP_STUCK_MS) return { started: false, reason: 'already running' };
+  if (sweeping) console.warn('[health] previous sweep looks stuck (> 3h): starting a new pass');
   sweeping = true;
+  sweepStartedAt = Date.now();
+  const gen = ++sweepGen;
   let probed = 0;
   (async () => {
     try {
@@ -236,7 +252,7 @@ export async function runSweep(force = false, deep = false) {
       if (pruned) scheduleSave();
       console.log(`[health] ${deep ? 'deep' : 'shallow'} sweep pass complete (${probed} probed, ${pruned} pruned, ${cache.size} cached)`);
     } finally {
-      sweeping = false;
+      if (gen === sweepGen) sweeping = false; // a stuck pass that ends late frees nothing
     }
   })();
   return { started: true };

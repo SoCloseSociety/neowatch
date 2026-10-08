@@ -1,7 +1,7 @@
 import { copyFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { config } from './config.js';
-import { stableId, classifyKind, writeFileAtomic } from './util.js';
+import { stableId, hash32, classifyKind, writeFileAtomic } from './util.js';
 import { proxyLink } from './signing.js';
 import { getHealth, isOnline } from './health.js';
 
@@ -412,7 +412,16 @@ function compose() {
     }
     const prev = byId.get(it.id);
     if (!prev) byId.set(it.id, it);
-    else collisions.push(`${it.id}: "${prev.name}" keeps it, "${it.name}" unreachable by id`);
+    else {
+      // The loser of a djb2 collision was unreachable by id: give it a second hash of
+      // its URL (FNV-1a, same lowercase-and-digits shape), derived, so it is stable.
+      const alt = hash32(it.url).toString(36);
+      if (alt !== it.id && !byId.has(alt)) {
+        collisions.push(`${it.id}: "${prev.name}" keeps it, "${it.name}" -> ${alt}`);
+        it.id = alt;
+        byId.set(alt, it);
+      } else collisions.push(`${it.id}: "${prev.name}" keeps it, "${it.name}" unreachable by id`);
+    }
     if (!it.channelId) continue;
     const key = normCid(it.channelId);
     if (!channelIdIndex.has(key)) channelIdIndex.set(key, it);
