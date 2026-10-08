@@ -53,7 +53,7 @@ export function ProgramSearch() {
   return (
     <section className="row border-b border-line pb-2 pt-4">
       <div className="flex items-center gap-3 px-[var(--gouttiere)]">
-        <h2 className="row-title m-0">{t('search.onAirNow')}</h2>
+        <h2 className="row-title m-0">{t(results.every((r) => r.live) ? 'search.onAirNow' : 'search.onAirAndNext')}</h2>
         <Meta parts={[t.n('count.shows', results.length)]} />
       </div>
       <div className="row-track scroll-pl-[var(--gouttiere)]">

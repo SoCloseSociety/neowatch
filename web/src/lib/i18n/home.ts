@@ -57,4 +57,5 @@ export const home = {
   'count.countries.few': { en: '{n} countries', fr: '{n} pays', ru: '{n} страны' },
   'count.countries.many': { en: '{n} countries', fr: '{n} pays', ru: '{n} стран' },
   'count.countries.other': { en: '{n} countries', fr: '{n} pays', ru: '{n} страны' },
+  'search.onAirAndNext': { en: 'On air and coming up', fr: 'À l’antenne et à venir', ru: 'В эфире и далее' },
 } satisfies Dict;

@@ -88,6 +88,10 @@ try {
     const played = await page.evaluate(() => window.__nwLastPlayedKey || null);
     ok('player records the played stream url', !!played && played === key, `${played} vs ${key}`);
     await page.keyboard.press('Escape').catch(() => {});
+    // Closing the player is a history.back() (the TV Back contract): let that navigation
+    // settle, or the next page.goto races it and aborts.
+    await page.locator('video').first().waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
   } else ok('a channel card to play', false);
 
   // 5) TV guide: programme blocks, or ONE honest empty state when no guide is loaded
