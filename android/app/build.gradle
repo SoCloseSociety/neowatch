@@ -1,0 +1,94 @@
+plugins {
+    id "com.android.application"
+}
+
+// ---------------------------------------------------------------- release signing
+// The release APK MUST be signed with the EXISTING NEOWATCH key (alias my-key-alias,
+// SHA-256 C8:6E:CD:...:F2:61): same key = installs over v1/v2 + Digital Asset Links
+// (web/public/.well-known/assetlinks.json) keep verifying the https deep links.
+// Nothing secret is tracked: values come from android/keystore.properties (gitignored)
+// or from environment variables. See keystore.properties.example.
+def ksProps = new Properties()
+def ksFile = rootProject.file("keystore.properties")
+if (ksFile.exists()) {
+    ksFile.withInputStream { ksProps.load(it) }
+}
+def setting = { String key, String env ->
+    def v = ksProps.getProperty(key) ?: System.getenv(env)
+    return v == null ? null : v.trim()
+}
+// Optional: read the passwords from the PWABuilder "signing-key-info.txt" note, so they
+// stay in one place instead of being copied around.
+def fromNote = [:]
+def notePath = setting("passwordsFrom", "NEOWATCH_SIGNING_INFO")
+if (notePath && file(notePath).exists()) {
+    file(notePath).eachLine("UTF-8") { line ->
+        def m = line =~ /^\s*(Key store password|Key password)\s*:\s*(.*?)\s*$/
+        if (m.matches()) fromNote[m.group(1)] = m.group(2)
+    }
+}
+def ksStore = setting("storeFile", "NEOWATCH_KEYSTORE")
+def ksAlias = setting("keyAlias", "NEOWATCH_KEY_ALIAS") ?: "my-key-alias"
+def ksStorePass = setting("storePassword", "NEOWATCH_KEYSTORE_PASSWORD") ?: fromNote["Key store password"]
+def ksKeyPass = setting("keyPassword", "NEOWATCH_KEY_PASSWORD") ?: fromNote["Key password"] ?: ksStorePass
+def signingReady = ksStore && file(ksStore).exists() && ksStorePass && ksKeyPass
+
+android {
+    namespace "co.soclose.neowatch.twa"
+    compileSdk 35
+
+    defaultConfig {
+        // FROZEN: Sentinel House launches the app by this package (media.py PAQUET_NEOWATCH),
+        // and assetlinks.json is bound to it. Never change it.
+        applicationId "co.soclose.neowatch.twa"
+        minSdk 23
+        targetSdk 34
+        versionCode 3
+        versionName "2.0.0"
+    }
+
+    signingConfigs {
+        release {
+            if (signingReady) {
+                storeFile file(ksStore)
+                storePassword ksStorePass
+                keyAlias ksAlias
+                keyPassword ksKeyPass
+                enableV1Signing true
+                enableV2Signing true
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            debuggable false
+            // Off on purpose: the app is a single Activity, the APK is tiny, nothing to gain.
+            minifyEnabled false
+            signingConfig signingReady ? signingConfigs.release : null
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+// Never ship an unsigned (or debug-signed) release by accident: it would not install over
+// the current app and would break the verified deep links.
+gradle.taskGraph.whenReady { graph ->
+    def wantsRelease = graph.allTasks.any { it.project == project && it.name ==~ /(assemble|package|bundle)Release/ }
+    if (wantsRelease && !signingReady) {
+        throw new GradleException(
+            "NEOWATCH release signing is not configured: create android/keystore.properties " +
+            "(see keystore.properties.example) or set NEOWATCH_KEYSTORE + NEOWATCH_SIGNING_INFO " +
+            "(or NEOWATCH_KEYSTORE_PASSWORD / NEOWATCH_KEY_PASSWORD).")
+    }
+}
+
+// Zero dependencies: the shell is plain android.webkit.WebView (the TV's system WebView).

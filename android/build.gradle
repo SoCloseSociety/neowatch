@@ -1,0 +1,5 @@
+// NEOWATCH Android TV shell -- root. Same toolchain as Sentinel House Android:
+// AGP 8.9.3 + Gradle 8.11.1 (wrapper) + JDK 17. Zero third-party dependencies.
+plugins {
+    id "com.android.application" version "8.9.3" apply false
+}

@@ -21,3 +21,4 @@ NEOWATCH - Google Play package/
 NEOWATCH - Google Play package.zip
 *.keystore
 signing-key-info.txt
+android/keystore.properties

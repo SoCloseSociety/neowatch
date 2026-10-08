@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NEOWATCH Android TV shell: one Activity hosting the system WebView.
+     Package co.soclose.neowatch.twa is FROZEN (Sentinel House + assetlinks.json). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Runs on phones/tablets too; leanback + no touchscreen keep it listed on TVs. -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <application
+        android:allowBackup="false"
+        android:banner="@drawable/banner"
+        android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.NeoWatch"
+        android:usesCleartextTraffic="false">
+
+        <meta-data android:name="android.webkit.WebView.EnableSafeBrowsing" android:value="true" />
+        <meta-data android:name="android.webkit.WebView.MetricsOptOut" android:value="true" />
+
+        <!-- Same class name as the v1/v2 TWA launcher (co.soclose.neowatch.twa.LauncherActivity),
+             so pinned launcher entries and any `am start -n` keep resolving after the update. -->
+        <activity
+            android:name=".LauncherActivity"
+            android:banner="@drawable/banner"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+
+            <!-- Verified app links (assetlinks.json): https://neowatch.soclose.co/* opens HERE,
+                 e.g. Sentinel House's https://neowatch.soclose.co/chaine/<id>. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="neowatch.soclose.co" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

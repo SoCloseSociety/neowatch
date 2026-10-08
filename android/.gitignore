@@ -1,0 +1,14 @@
+# Build outputs
+.gradle/
+build/
+app/build/
+*.apk
+*.aab
+.idea/
+*.iml
+.DS_Store
+# Machine-local + SECRETS: never commit
+local.properties
+keystore.properties
+*.keystore
+*.jks

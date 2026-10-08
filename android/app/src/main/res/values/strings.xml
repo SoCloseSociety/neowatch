@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NEOWATCH</string>
+    <string name="no_app_for_link">No app on this device can open that link.</string>
+</resources>
