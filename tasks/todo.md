@@ -42,9 +42,12 @@ Behaviour changes to know: mock checkout closes in production unless `ALLOW_MOCK
 Open for OPS: `.env.example` (drop ACCESS_PASSWORD, add ALLOW_MOCK_BILLING, ALLOW_PRIVATE_SOURCES scope), DEPLOY.md Stripe events + 410, `tasks/epg/grab.sh` atomic write, nginx document headers (X-Frame-Options DENY, CSP frame-ancestors, nosniff, HSTS) -- prod nginx edit needs the owner's explicit OK.
 
 ### Lot W0 -- design foundation (alone, first)
-- [ ] Tokens Lunaire in index.css + tailwind mapping, IBM Plex Sans/Mono, focus ring (bone white + halo + scale), ui primitives (button primary/secondary/discreet, pill, empty state with action, toast), 12px floor, reduced motion, one primary action rule. Exact spec: see Design spec section below.
+- [x] Tokens Lunaire in index.css + tailwind mapping, IBM Plex Sans/Mono, focus ring (bone white + halo + scale), ui primitives (button primary/secondary/discreet, pill, empty state with action, toast), 12px floor, reduced motion, one primary action rule. Exact spec: see Design spec section below.
 
-### Lots W1..Wn -- pages (parallel, disjoint files) -- filled from the design spec
+#### Review (Lot 0, 08/10)
+typecheck + build green; tokens 51/51 Lunaire + 24/24 Doux equal to Sentinel charte.css (`node tasks/verify-design.mjs --tokens`); 0 off-origin font/script requests (66 before); focus faults 139 -> 2; contrast faults 418 -> 84; sub-12px nodes 8334 -> 4751 (rest is page-level, lots A-D); legacy settings migrate to Lunaire. i18n fragments `web/src/lib/i18n/{home,shell,pages,logic}.ts`, primitives in `ui.tsx`, `lib/device.ts` (isTV).
+
+### Lots A-D -- pages + web logic (parallel, disjoint files): see design spec sections 5 + 7
 ### Lot W-logic -- web correctness
 - [ ] sw.js: cache-first only for hashed /assets with res.ok and non-HTML; navigation branch only for request.mode==='navigate'; never cache errors. App: vite:preloadError reload-once + ErrorBoundary.
 - [ ] Stores: guarded localStorage everywhere; persist only stable channel fields (no proxyUrl); `freshChannel()` re-resolves via the frozen `/catalog/channel/:id` before play / mosaic; favorites merge (server + local) instead of overwrite; logout clears per-account state; cross-tab user refresh; /api/config retried.

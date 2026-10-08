@@ -1,4 +1,5 @@
 import type { Channel } from '@/types';
+import { currentLang, hasKey, translate } from './i18n';
 
 // The proxy URL is SIGNED server-side (HMAC + TTL) and delivered as ch.proxyUrl
 // for every channel the user is allowed to play. The client never builds or
@@ -28,43 +29,29 @@ export function youTubeEmbed(id: string): string {
   return `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&playsinline=1&modestbranding=1&rel=0`;
 }
 
-// Curated icons + FR labels for the most useful categories.
-export const CATEGORY_META: Record<string, { label: string; icon: string }> = {
-  sports: { label: 'Sport', icon: '⚽' },
-  news: { label: 'News / Actu', icon: '📰' },
-  movies: { label: 'Films', icon: '🎬' },
-  series: { label: 'Séries', icon: '📺' },
-  entertainment: { label: 'Divertissement', icon: '✨' },
-  kids: { label: 'Enfants', icon: '🧸' },
-  music: { label: 'Musique', icon: '🎵' },
-  documentary: { label: 'Docu', icon: '🌍' },
-  general: { label: 'Généraliste', icon: '📡' },
-  culture: { label: 'Culture', icon: '🎭' },
-  comedy: { label: 'Comédie', icon: '😄' },
-  cooking: { label: 'Cuisine', icon: '🍳' },
-  lifestyle: { label: 'Lifestyle', icon: '💎' },
-  business: { label: 'Business', icon: '📈' },
-  science: { label: 'Science', icon: '🔬' },
-  education: { label: 'Éducation', icon: '🎓' },
-  religious: { label: 'Religion', icon: '🕊️' },
-  travel: { label: 'Voyage', icon: '✈️' },
-  weather: { label: 'Météo', icon: '⛅' },
-  animation: { label: 'Animation', icon: '🎨' },
-  family: { label: 'Famille', icon: '👨‍👩‍👧' },
-  legislative: { label: 'Politique', icon: '🏛️' },
-  outdoor: { label: 'Outdoor', icon: '🏔️' },
-  auto: { label: 'Auto/Moto', icon: '🏎️' },
-  shop: { label: 'Shopping', icon: '🛍️' },
-  relax: { label: 'Détente', icon: '🧘' },
-  undefined: { label: 'Autres', icon: '📦' },
+// Category emoji, for DATA only (iptv-org categories, e.g. inside a select).
+// Spec 2.3: no emoji in row titles, tiles or cards. Labels are i18n keys
+// `cat.<id>` (lib/i18n.ts), in the current UI language.
+export const CATEGORY_ICONS: Record<string, string> = {
+  sports: '⚽', news: '📰', movies: '🎬', series: '📺', entertainment: '✨', kids: '🧸',
+  music: '🎵', documentary: '🌍', general: '📡', culture: '🎭', comedy: '😄', cooking: '🍳',
+  lifestyle: '💎', business: '📈', science: '🔬', education: '🎓', religious: '🕊️', travel: '✈️',
+  weather: '⛅', animation: '🎨', family: '👨‍👩‍👧', legislative: '🏛️', outdoor: '🏔️', auto: '🏎️',
+  shop: '🛍️', relax: '🧘', classic: '🎞️', public: '🏛️', interactive: '🕹️', undefined: '📦',
 };
 
+/** Category label in the current UI language (`cat.<id>`), else the id capitalised.
+ *  One argument only: it is used as `categories.map(categoryLabel)`. */
 export function categoryLabel(id: string): string {
-  return CATEGORY_META[id]?.label || id.charAt(0).toUpperCase() + id.slice(1);
+  const key = `cat.${id}`;
+  return hasKey(key) ? translate(currentLang(), key) : id.charAt(0).toUpperCase() + id.slice(1);
 }
 export function categoryIcon(id: string): string {
-  return CATEGORY_META[id]?.icon || '📺';
+  return CATEGORY_ICONS[id] || '📺';
 }
+
+// Locale-aware formatting lives in lib/i18n.ts; re-exported for convenience.
+export { fmtNum, fmtTime, fmtDate, fmtAge } from './i18n';
 
 export function qualityRank(q: string | null): number {
   if (!q) return 0;

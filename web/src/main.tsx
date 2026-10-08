@@ -1,7 +1,25 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+// IBM Plex, self-hosted (OFL, @fontsource): no request leaves the origin, the
+// fonts are content-hashed under /assets (offline in the PWA), and the
+// unicode-range subsets mean a Latin page never downloads Cyrillic.
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/500.css';
+import '@fontsource/ibm-plex-sans/600.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
+import '@fontsource/ibm-plex-mono/600.css';
 import App from './App';
 import './index.css';
+import { applyDeviceFlags } from './lib/device';
+import { applyTheme } from './store/settingsStore';
+import { applyLang } from './lib/i18n';
+
+// Before the first render: data-tv (the 10-foot tokens), data-theme/motion and
+// <html lang>, so the first frame already has the right scale, style and language.
+applyDeviceFlags();
+applyTheme();
+applyLang();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

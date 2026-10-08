@@ -2,11 +2,230 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================================
+ * NEOWATCH tokens: the Sentinel TV OS language (DESIGN-SPEC section 1).
+ * Lunaire on :root (default), Doux on :root[data-theme="doux"], the phone
+ * scale under 760 px, the 10-foot scale on :root[data-tv].
+ * The shared names keep charte.css values byte for byte:
+ *   node tasks/verify-design.mjs --tokens <SentinelHouse>/.../ui/charte.css
+ * Rules: no literal colour or text px outside these token blocks; text never
+ * under 12 px; only transform and opacity animate; mint = state OK only.
+ * ========================================================================== */
 :root {
-  --accent: 34 211 238;
-  --surface: 10 14 20;
-  --panel: 17 23 33;
-  --ink: 226 232 240;
+  color-scheme: dark;
+  /* Sentinel Lunaire: values equal to charte.css :root */
+  --e-fond: #05070a;
+  --bg-0: #06080a;
+  --bg-1: #0a0d10;
+  --bg-2: #0e1318;
+  --bg-3: #121922;
+  --bg-4: #182230;
+  --t1: #e9eef2;
+  --t2: #97a6b2;
+  --t3: #7c8a96;
+  --t4: #778593;
+  --line: rgba(160,185,205,.13);
+  --line-soft: rgba(160,185,205,.07);
+  --line-strong: rgba(170,195,215,.26);
+  --mint: #34e5a0;
+  --cyan: #45c9e6;
+  --amber: #e8b13a;
+  --red: #ff5e5e;
+  --violet: #7c8cff;
+  /* state OK / the thread ONLY, never a button fill */
+  --accent: var(--mint);
+  --surface-carte: rgba(14,19,24,.88);
+  --surface-mini: rgba(10,13,16,.72);
+  --surface-pill: rgba(10,13,16,.8);
+  --surface-puce: rgba(5,7,10,.45);
+  --surface-panneau: var(--bg-1);
+  --surface-menu: var(--bg-2);
+  --surface-pill-image: rgba(10,13,16,.8);
+  --encre-image: #f2f6f8;
+  --voile-image: linear-gradient(180deg, rgba(5,7,10,0) 30%, rgba(5,7,10,.86) 100%);
+  --voile-hero: linear-gradient(90deg, rgba(5,7,10,.9) 0, rgba(5,7,10,.55) 38%, rgba(5,7,10,.08) 70%),
+                linear-gradient(180deg, rgba(5,7,10,0) 0, rgba(5,7,10,0) 30%, rgba(5,7,10,.92) 62%, rgba(5,7,10,1) 80%);
+  --primaire-fond: var(--t1);
+  --primaire-encre: var(--bg-1);
+  --focus-anneau: var(--t1);
+  --focus-halo: var(--e-fond);
+  --ombre-texte-ciel: 0 2px 6px rgba(0,0,0,.55);
+  --ombre-panneau: -40px 0 80px -30px rgba(0,0,0,.8);
+  --ombre-toast: 0 12px 34px -10px rgba(0,0,0,.7);
+  --ombre-menu: 0 18px 50px -18px rgba(0,0,0,.85);
+  --scrim-panneau: rgba(5,7,10,.45);
+  /* type (x --ech, floor 12px) */
+  --ech: 1;
+  --ts-geant: calc(64px * var(--ech, 1));
+  --ts-titre: calc(34px * var(--ech, 1));
+  --ts-titre-2: calc(26px * var(--ech, 1));
+  --ts-rangee: calc(19px * var(--ech, 1));
+  --ts-carte: calc(17px * var(--ech, 1));
+  --ts-corps: calc(15px * var(--ech, 1));
+  --ts-sous: max(12px, calc(14px * var(--ech, 1)));
+  --ts-libelle: max(12px, calc(13px * var(--ech, 1)));
+  --ts-meta: max(12px, calc(12.5px * var(--ech, 1)));
+  --ts-sur: max(12px, calc(12px * var(--ech, 1)));
+  --ts-min: max(12px, calc(12px * var(--ech, 1)));
+  --ts-saisie: calc(15px * var(--ech, 1));
+  --ls-sur: .22em;
+  --ls-pill: .1em;
+  --ls-titre: -.012em;
+  --ls-geant: -.03em;
+  --lh-titre: 1.08;
+  --lh-corps: 1.4;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  /* space, shape */
+  --gouttiere: 40px;
+  --ecart-rangees: 34px;
+  --ecart-cartes: 16px;
+  --pad-carte: 16px;
+  --pad-panneau: 20px;
+  --carte-l: 288px;
+  --carte-l-large: 444px;
+  --carte-ratio: 16 / 9;
+  --rayon: 14px;
+  --rayon-sm: 10px;
+  --rayon-kbd: 6px;
+  --rp: 999px;
+  --cible-doigt: 44px;
+  --cible-souris: 36px;
+  --btn-h: 40px;
+  --champ-h: 44px;
+  --entete-h: 64px;
+  --avatar: 34px;
+  --fil-l: 80px;
+  --fil-h: 2px;
+  --point: 8px;
+  --pastille-h: 24px;
+  --panneau-l: min(520px, 42vw);
+  --menu-l: 240px;
+  --dock-h: calc(68px + env(safe-area-inset-bottom, 0px));
+  /* motion + focus */
+  --d1: 180ms;
+  --d2: 240ms;
+  --d3: 380ms;
+  --ease: cubic-bezier(.22,.61,.36,1);
+  --focus-trait: 2px;
+  --focus-ecart: 3px;
+  --focus-echelle: 1.03;
+  --anneau: 0 0 0 var(--focus-trait) var(--focus-anneau), 0 0 0 calc(var(--focus-trait) + var(--focus-ecart)) var(--focus-halo);
+  --anneau-l: calc(var(--focus-trait) + var(--focus-ecart));
+  /* Tailwind channel triplets (derived from the tokens above, keep in sync) */
+  --surface: 5 7 10;
+  --panel: 14 19 24;
+  --panel-2: 18 25 34;
+  --ink: 233 238 242;
+  --ink-2: 151 166 178;
+  --ink-3: 124 138 150;
+  --accent-rgb: 233 238 242;   /* tailwind "accent" = BONE (choice / primary / focus) */
+  --live: 255 94 94;
+  --gold: 232 177 58;
+  --ok: 52 229 160;
+  --line-rgb: 160 185 205;
+}
+/* values equal to charte.css [data-theme="doux"] */
+:root[data-theme="doux"] {
+  color-scheme: light;
+  --e-fond: #f3ecdf;
+  --bg-0: #f3ecdf;
+  --bg-1: #f8f3e9;
+  --bg-2: #fcf9f2;
+  --bg-3: #ffffff;
+  --bg-4: #efe6d6;
+  --t1: #27221d;
+  --t2: #5a524a;
+  --t3: #6b635a;
+  --t4: #6b635a;
+  --line: rgba(90,70,50,.12);
+  --line-soft: rgba(90,70,50,.07);
+  --line-strong: rgba(90,70,50,.22);
+  --mint: #0b7556;
+  --cyan: #0b6f86;
+  --amber: #8a5a00;
+  --red: #c03a2b;
+  --violet: #4f5bc4;
+  --surface-carte: rgba(255,255,255,.96);
+  --surface-mini: rgba(255,253,248,.92);
+  --surface-pill: rgba(255,255,255,.9);
+  --surface-puce: rgba(255,255,255,.7);
+  --primaire-encre: #fcf9f2;
+  --focus-halo: var(--bg-1);
+  --ombre-texte-ciel: none;
+  --ombre-panneau: -30px 0 70px -30px rgba(90,60,30,.35);
+  --ombre-toast: 0 12px 34px -8px rgba(90,60,30,.3);
+  --ombre-menu: 0 18px 50px -18px rgba(90,60,30,.4);
+  --scrim-panneau: rgba(90,70,50,.18);
+  --surface: 243 236 223;
+  --panel: 252 249 242;
+  --panel-2: 255 255 255;
+  --ink: 39 34 29;
+  --ink-2: 90 82 74;
+  --ink-3: 107 99 90;
+  --accent-rgb: 39 34 29;
+  --live: 192 58 43;
+  --gold: 138 90 0;
+  --ok: 11 117 86;
+  --line-rgb: 90 70 50;
+  /* --encre-image and --voile-image stay dark in Doux: text on a thumbnail stays light on a dark scrim */
+}
+/* The phone: the same scale, at arm's length (charte.css section 3). */
+@media (max-width: 760px) {
+  :root {
+    --ts-geant: calc(48px * var(--ech, 1));
+    --ts-titre: calc(28px * var(--ech, 1));
+    --ts-titre-2: calc(22px * var(--ech, 1));
+    --ts-rangee: calc(18px * var(--ech, 1));
+    --ts-corps: calc(16px * var(--ech, 1));
+    /* 16 px in a field: iOS does not zoom on focus */
+    --ts-saisie: max(16px, calc(16px * var(--ech, 1)));
+    --gouttiere: 16px;
+    --ecart-rangees: 26px;
+    --ecart-cartes: 12px;
+    --pad-carte: 14px;
+    --pad-panneau: 18px;
+    --carte-l: 240px;
+    --carte-l-large: 300px;
+    --btn-h: 44px;
+    --entete-h: 56px;
+    --panneau-l: 100%;
+    --focus-echelle: 1;
+  }
+}
+@media (pointer: coarse) {
+  :root { --btn-h: 44px; }
+}
+/* TV (10-foot): the wall's 1920 design units, the same --k idea as tableau.css.
+   At 960 CSS px (TCL DPR 2), 24u = 12px. Set by lib/device.ts before render. */
+:root[data-tv] {
+  --u: calc(100vw / 1920);
+  --ts-titre: calc(66 * var(--u));
+  --ts-titre-2: calc(48 * var(--u));
+  --ts-rangee: calc(30 * var(--u));
+  --ts-carte: calc(30 * var(--u));
+  --ts-corps: max(12px, calc(28 * var(--u)));
+  --ts-sous: max(12px, calc(24 * var(--u)));
+  --ts-libelle: max(12px, calc(24 * var(--u)));
+  --ts-meta: max(12px, calc(24 * var(--u)));
+  --ts-sur: max(12px, calc(24 * var(--u)));
+  --ts-min: max(12px, calc(24 * var(--u)));
+  --ts-saisie: max(12px, calc(28 * var(--u)));
+  --gouttiere: calc(96 * var(--u));
+  --ecart-cartes: calc(30 * var(--u));
+  --ecart-rangees: calc(28 * var(--u));
+  --carte-l: calc(384 * var(--u));
+  --carte-l-large: calc(592 * var(--u));
+  --pad-carte: calc(22 * var(--u));
+  --btn-h: calc(64 * var(--u));
+  --champ-h: calc(72 * var(--u));
+  --entete-h: calc(110 * var(--u));
+  --pastille-h: calc(44 * var(--u));
+  --fil-l: calc(160 * var(--u));
+  --fil-h: calc(2 * var(--u));
+  --focus-trait: calc(4 * var(--u));
+  --focus-ecart: calc(4 * var(--u));
+  --focus-echelle: 1.06;
 }
 
 @layer base {
@@ -18,34 +237,57 @@
   #root {
     height: 100%;
   }
+  html,
+  body {
+    background: var(--e-fond);
+  }
   body {
     margin: 0;
-    color: rgb(var(--ink));
-    font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    color: var(--t1);
+    font-family: var(--sans);
+    font-size: var(--ts-corps);
+    line-height: var(--lh-corps);
     overscroll-behavior: none;
-    /* Premium depth: cyan glow top-left + violet glow top-right over the surface. */
-    background:
-      radial-gradient(1100px 520px at 8% -8%, rgb(var(--accent) / 0.10), transparent 60%),
-      radial-gradient(900px 480px at 100% 0%, rgba(124, 92, 252, 0.07), transparent 55%),
-      rgb(var(--surface));
-    background-attachment: fixed;
   }
-  /* High-contrast focus ring on EVERY interactive element — essential for TV
-     remote / D-pad and keyboard navigation. */
+  ::selection {
+    background: var(--line-strong);
+    color: var(--t1);
+  }
+  .mono,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+  /* THE focus of the TV, everywhere: a bone ring framed by a dark halo, never
+     colour alone and never mint. `!important` is deliberate: it is the one
+     affordance every page shares, so a `focus:outline-none` utility cannot
+     remove it (the D-pad and keyboard need it). Cards add a scale (.lift). */
   :focus-visible {
-    outline: 2px solid rgb(var(--accent));
-    outline-offset: 2px;
-    border-radius: 6px;
+    outline: var(--focus-trait) solid var(--focus-anneau) !important;
+    outline-offset: 2px !important;
+    box-shadow: 0 0 0 calc(var(--focus-trait) + var(--focus-ecart) + 2px) var(--focus-halo) !important;
   }
-  /* Thicker ring on large screens / TVs where the viewer sits far away. */
-  @media (min-width: 1536px) {
-    :focus-visible {
-      outline-width: 3px;
-    }
+  :focus:not(:focus-visible) {
+    outline: none;
   }
-  [data-motion='reduce'] * {
+  /* Reduced motion: the in-app setting and the OS preference. An infinite
+     animation reset to a 0.001 ms duration would flicker, so iterations go to 1. */
+  [data-motion='reduce'] *,
+  [data-motion='reduce'] *::before,
+  [data-motion='reduce'] *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
   }
   /* TV browsers / WebViews sometimes force their own media UI (a fullscreen button,
      a play/close overlay) onto a <video> even with controls disabled. Hide it on our
@@ -70,56 +312,302 @@
 }
 
 @layer components {
-  .input {
-    @apply rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink placeholder:text-ink/30 focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30;
+  /* ── fields ─────────────────────────────────────────────────────────── */
+  .input,
+  .field-input {
+    min-height: var(--champ-h);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--rayon-sm);
+    background: var(--bg-1);
+    color: var(--t1);
+    font-family: var(--sans);
+    font-size: var(--ts-saisie);
+    padding: 0 12px;
+  }
+  textarea.input {
+    padding: 10px 12px;
   }
   /* Text input with a leading icon (login/account fields). */
   .field-input {
-    @apply w-full rounded-xl border border-white/10 bg-black/30 py-2.5 pl-9 pr-3 text-sm text-ink placeholder:text-ink/30 focus:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/30;
+    width: 100%;
+    padding-left: 36px;
   }
-  /* Frosted glass surface used by bars/panels. */
+  .input::placeholder,
+  .field-input::placeholder {
+    color: var(--t3);
+    opacity: 1;
+  }
+  .input:focus,
+  .field-input:focus {
+    border-color: var(--t3);
+  }
+
+  /* Surface used by bars/panels (no blur on TV: it costs the SoC). */
   .glass {
-    @apply border border-white/[0.07] bg-panel/70 backdrop-blur-xl;
+    border: 1px solid var(--line);
+    background: var(--surface-pill);
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
   }
-  /* Accent gradient text for headlines. */
-  .text-gradient {
-    background: linear-gradient(100deg, rgb(var(--ink)), rgb(var(--accent)));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+  :root[data-tv] .glass {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  /* ── buttons: ONE .btn-primary per screen ───────────────────────────── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: var(--btn-h);
+    padding: 0 18px;
+    border: 1px solid transparent;
+    border-radius: var(--rp);
+    font-family: var(--sans);
+    font-size: var(--ts-sous);
+    font-weight: 600;
+    line-height: 1.1;
+    white-space: nowrap;
+    text-transform: none;
+    letter-spacing: 0;
+    cursor: pointer;
+    user-select: none;
+    transition: transform var(--d1) var(--ease), opacity var(--d1) var(--ease);
+  }
+  .btn:active {
+    transform: scale(.98);
+  }
+  .btn:disabled,
+  .btn[aria-disabled='true'] {
+    opacity: .5;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn-primary {
+    background: var(--primaire-fond);
+    color: var(--primaire-encre);
+  }
+  .btn-secondary {
+    background: var(--bg-2);
+    border-color: var(--line-strong);
+    color: var(--t1);
+  }
+  .btn-quiet {
+    background: transparent;
+    color: var(--t2);
+  }
+  .btn-quiet:hover {
+    color: var(--t1);
+  }
+  .btn-danger {
+    background: transparent;
+    border-color: var(--red);
+    color: var(--red);
+  }
+  /* Square icon button (always with an aria-label). */
+  .btn-icon {
+    width: var(--btn-h);
+    padding: 0;
+  }
+
+  /* ── pills and overlines (the only place for mono caps) ─────────────── */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: var(--pastille-h);
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--rp);
+    background: var(--surface-pill);
+    color: var(--t2);
+    font-family: var(--mono);
+    font-size: var(--ts-sur);
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: var(--ls-pill);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .pill-live {
+    color: var(--t1);
+  }
+  .pill-live::before {
+    content: '';
+    width: var(--point);
+    height: var(--point);
+    flex: none;
+    border-radius: 50%;
+    background: var(--red);
+  }
+  /* The one pulse allowed (hero LIVE point): opacity, two steps. */
+  .pill-pulse::before {
+    animation: nwPoint 2.4s steps(1, end) infinite;
+  }
+  .pill-ok {
+    color: var(--mint);
+  }
+  .pill-ok::before {
+    content: '✓';
+  }
+  .pill-att {
+    color: var(--amber);
+  }
+  .pill-att::before {
+    content: '▲';
+    font-size: .8em;
+  }
+  .pill-alert {
+    color: var(--red);
+  }
+  .pill-alert::before {
+    content: '●';
+  }
+  .overline {
+    font-family: var(--mono);
+    font-size: var(--ts-sur);
+    font-weight: 500;
+    letter-spacing: var(--ls-sur);
+    text-transform: uppercase;
+    color: var(--t3);
+  }
+  /* Mono meta line; children are separated by " · ". */
+  .meta {
+    font-family: var(--mono);
+    font-size: var(--ts-meta);
+    color: var(--t3);
+    font-variant-numeric: tabular-nums;
+  }
+  .meta > * + *::before {
+    content: '·';
+    margin: 0 .5em;
+  }
+  .brand {
+    font-family: var(--mono);
+    font-weight: 500;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--rayon-kbd);
+    background: var(--bg-2);
+    color: var(--t2);
+    font-family: var(--mono);
+    font-size: var(--ts-min);
+    line-height: 1;
+  }
+
+  /* ── rows (spec 2.3) ────────────────────────────────────────────────── */
+  .row-title {
+    font-family: var(--sans);
+    font-size: var(--ts-rangee);
+    font-weight: 600;
+    letter-spacing: var(--ls-titre);
+    color: var(--t2);
+    transition: color var(--d1) var(--ease);
+  }
+  .row:focus-within .row-title {
+    color: var(--t1);
+  }
+  /* The track leaves room for the ring and the focus scale; the next card
+     peeks at the right edge (no right padding). */
+  .row-track {
+    display: flex;
+    gap: var(--ecart-cartes);
+    padding: calc(var(--anneau-l) + 6px) 0 calc(var(--anneau-l) + 10px) var(--gouttiere);
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+  .row-track::-webkit-scrollbar {
+    height: 0;
+    width: 0;
+  }
+  /* A 16:9 card surface (Lot A ChannelCard). */
+  .card-surface {
+    position: relative;
+    aspect-ratio: var(--carte-ratio);
+    border-radius: var(--rayon);
+    background: var(--surface-carte);
+    box-shadow: inset 0 0 0 1px var(--line);
+    overflow: hidden;
+  }
+
+  /* ── hero ───────────────────────────────────────────────────────────── */
+  .scrim-hero {
+    background: var(--voile-hero);
+  }
+  .text-on-image {
+    color: var(--encre-image);
+    text-shadow: var(--ombre-texte-ciel);
+  }
+  /* The ONE mint thread under the hero sentence: "on air now". */
+  .thread {
+    display: block;
+    width: var(--fil-l);
+    height: var(--fil-h);
+    border-radius: 1px;
+    background: var(--mint);
+  }
+
+  /* ── toast (spec 2.10) ──────────────────────────────────────────────── */
+  .toast {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    max-width: min(560px, calc(100vw - 32px));
+    padding: 0 8px 0 18px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--rp);
+    background: var(--bg-3);
+    box-shadow: var(--ombre-toast);
+    color: var(--t1);
+    font-size: var(--ts-sous);
   }
 }
 
 @layer utilities {
-  /* Slow cinematic zoom for hero backdrops. */
-  @keyframes kenburns {
-    from { transform: scale(1.02); }
-    to { transform: scale(1.08); }
-  }
-  .animate-kenburns {
-    animation: kenburns 30s ease-in-out infinite alternate;
-  }
-  /* Card lift on hover/focus. */
+  /* Card focus: the global ring + a scale from the left (1.03 desktop, 1.06 TV,
+     none on phone). Transform only, no shadow or translate. */
   .lift {
-    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    transition: transform var(--d1) var(--ease);
+    transform-origin: left center;
   }
-  .lift:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 12px 30px -12px rgb(var(--accent) / 0.35);
+  .lift:focus-visible {
+    transform: scale(var(--focus-echelle));
+  }
+  @media (hover: hover) {
+    .lift:hover {
+      transform: scale(var(--focus-echelle));
+    }
   }
   /* Horizontal rails: hide the scrollbar entirely. */
   .nw-scroll::-webkit-scrollbar { height: 0; width: 0; }
   .nw-scroll { scrollbar-width: none; scroll-behavior: smooth; }
   /* Thin scrollbar for inner panels (e.g. live chat). */
   .nw-thin::-webkit-scrollbar { width: 6px; }
-  .nw-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 6px; }
+  .nw-thin::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 6px; }
   .nw-thin { scrollbar-width: thin; }
   /* Native windowing: the browser skips rendering off-screen cards (huge perf
      win on the 16k-channel grid) while remembering their real size. */
   .cv-card { content-visibility: auto; contain-intrinsic-size: auto 220px; }
 }
 
-/* Sleek dark scrollbars */
+@keyframes nwPoint {
+  0% { opacity: 1; }
+  50%, 100% { opacity: .35; }
+}
+
+/* Quiet scrollbars */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -128,12 +616,12 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(var(--ink) / 0.12);
+  background: var(--line-strong);
   border-radius: 10px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--accent) / 0.4);
+  background: var(--t3);
   background-clip: content-box;
 }
