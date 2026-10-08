@@ -6,49 +6,45 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Read-only token: the workflow builds and tests, it never writes to the repo.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc # 20.20.2, the production Node (undici must stay on 6)
           cache: npm
 
       - name: Install
         run: npm ci
 
+      - name: undici is on major 6 (Node 20 in production)
+        run: node -e "const v=require('undici/package.json').version; console.log('undici', v); if (v.split('.')[0] !== '6') process.exit(1)"
+        working-directory: server
+
       - name: Typecheck (web)
-        run: npm --workspace web run typecheck
+        run: npm run typecheck
 
       - name: Build (web)
-        run: npm --workspace web run build
+        run: npm run build
 
-      - name: Start server + integration suite
-        env:
-          PORT: 8787
-          ADMIN_EMAIL: ci-admin@neowatch.local
-          ADMIN_PASSWORD: ci-test-password-123
-          JWT_SECRET: ci-only-non-secret-jwt-key-please-override-in-prod
-          NODE_ENV: test
+      - name: i18n keys (every t() key exists in EN, FR and RU)
+        # --tokens compares with Sentinel House charte.css, which is not in this repo: local only.
+        run: node test/verify-design.mjs --keys
+
+      - name: Server suites (contract, integration, proxy, account, catalog, session)
+        run: npm test
+
+      - name: Dependency audit (production deps, high and critical)
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: No em dash in tracked files
         run: |
-          npm start &
-          SERVER_PID=$!
-          echo "Waiting for /api/health…"
-          for i in $(seq 1 40); do
-            if curl -sf http://localhost:8787/api/health >/dev/null; then echo "up"; break; fi
-            sleep 3
-          done
-          echo "Warming the catalog (first request builds it)…"
-          for i in $(seq 1 40); do
-            TOTAL=$(curl -sf "http://localhost:8787/api/catalog/meta" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).total||0)}catch{console.log(0)}})' || echo 0)
-            if [ "$TOTAL" -gt 0 ] 2>/dev/null; then echo "catalog ready: $TOTAL channels"; break; fi
-            sleep 5
-          done
-          BASE=http://localhost:8787 node tasks/integration-test.mjs
-          STATUS=$?
-          kill $SERVER_PID 2>/dev/null || true
-          exit $STATUS
+          if git grep -nI $'\u2014' -- . ; then echo "Use -- instead of an em dash"; exit 1; fi

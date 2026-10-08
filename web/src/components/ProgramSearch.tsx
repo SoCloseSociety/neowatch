@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Tv2, Play } from 'lucide-react';
 import { api } from '@/lib/api';
-import { searchProgrammes, fmtTime, type ProgrammeResult } from '@/lib/epg';
+import { searchProgrammes, type ProgrammeResult } from '@/lib/epg';
 import type { Channel } from '@/types';
 import { useCatalog } from '@/store/catalogStore';
 import { useAuth } from '@/store/authStore';
 import { usePlayer } from '@/store/playerStore';
 import { useUI } from '@/store/uiStore';
-import { useT } from '@/lib/i18n';
+import { fmtTime, useT } from '@/lib/i18n';
+import { monogram } from './ChannelCard';
+import { LivePill, Meta } from './ui';
 
-// Shows TV programmes (now / upcoming) matching the search query, across all
-// channels that have EPG data. Clicking a result opens the channel.
+// Search results, second row: programmes on air (or coming) that match the
+// query, across every channel with a guide (spec 4, Search). One card = one
+// action: play the channel.
 export function ProgramSearch() {
   const t = useT();
   const q = useCatalog((s) => s.filters.q);
@@ -26,7 +28,7 @@ export function ProgramSearch() {
       return;
     }
     let alive = true;
-    searchProgrammes(q).then((r) => alive && setResults(r));
+    searchProgrammes(q).then((r) => alive && setResults(r.slice(0, 16)));
     return () => {
       alive = false;
     };
@@ -36,49 +38,50 @@ export function ProgramSearch() {
 
   const open = async (r: ProgrammeResult) => {
     try {
-      const ch = await api.get<Channel>(`/catalog/channel/${r.channel.id}`);
+      const ch = await api.get<Channel>(`/catalog/channel/${encodeURIComponent(r.channel.id)}?channelId=${encodeURIComponent(r.channelId)}`);
       if (ch.locked) {
         setPricing(true);
         return;
       }
       addRecent(ch);
-      play(ch);
+      play(ch, { queue: [ch] });
     } catch {
-      /* ignore */
+      /* the channel is gone: nothing to play */
     }
   };
 
   return (
-    <div className="border-b border-white/[0.06] bg-panel/40 px-4 py-2">
-      <div className="mb-1.5 flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-ink/40">
-        <Tv2 size={12} /> {t('progsearch.onAir')} « {q} »
+    <section className="row border-b border-line pb-2 pt-4">
+      <div className="flex items-center gap-3 px-[var(--gouttiere)]">
+        <h2 className="row-title m-0">{t('search.onAirNow')}</h2>
+        <Meta parts={[t.n('count.shows', results.length)]} />
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <div className="row-track scroll-pl-[var(--gouttiere)]">
         {results.map((r) => (
           <button
             key={`${r.channel.id}-${r.start}-${r.title}`}
+            type="button"
             onClick={() => open(r)}
-            className="group flex w-56 shrink-0 items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.02] p-2 text-left hover:border-accent/40 focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/50"
+            className="lift flex w-[var(--carte-l)] shrink-0 snap-start items-center gap-3 rounded-card bg-[var(--surface-carte)] p-3 text-left shadow-[inset_0_0_0_1px_var(--line)]"
           >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-black/40">
+            <span className="flex h-12 w-16 shrink-0 items-center justify-center rounded-field bg-[var(--bg-3)]">
               {r.channel.logo ? (
-                <img src={r.channel.logo} alt="" className="max-h-full max-w-full object-contain" referrerPolicy="no-referrer" />
+                <img src={r.channel.logo} alt="" width={56} height={40} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-auto max-h-[70%] w-auto max-w-[80%] object-contain" />
               ) : (
-                <Play size={14} className="text-ink/30" />
+                <span aria-hidden="true" translate="no" className="font-mono text-sous font-semibold text-ink-2">{monogram(r.channel.name)}</span>
               )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1">
-                {r.live && <span className="h-1.5 w-1.5 shrink-0 animate-pulse-live rounded-full bg-emerald-400" />}
-                <span className="truncate text-[11px] font-medium text-ink">{r.title}</span>
-              </div>
-              <div className="truncate text-[10px] text-ink/40">
-                {r.channel.flag} {r.channel.name} · {fmtTime(r.start)}
-              </div>
-            </div>
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col gap-1">
+              <span translate="no" className="truncate text-sous font-semibold text-ink">{r.title}</span>
+              <span className="flex min-w-0 items-center gap-2 text-meta text-ink-2">
+                {r.live ? <LivePill /> : <span className="shrink-0 font-mono text-ink-3">{fmtTime(r.start)}</span>}
+                <span translate="no" className="truncate">{r.channel.name}</span>
+              </span>
+            </span>
           </button>
         ))}
+        <span aria-hidden="true" className="w-[var(--gouttiere)] shrink-0" />
       </div>
-    </div>
+    </section>
   );
 }

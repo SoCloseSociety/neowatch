@@ -1,20 +1,42 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
-import { X, Check, Crown, Loader2, Sparkles } from 'lucide-react';
+import { X, Check } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/store/authStore';
-import { useUI } from '@/store/uiStore';
+import { useUI, toast } from '@/store/uiStore';
 import { useCatalog } from '@/store/catalogStore';
-import { useEscapeClose } from './ui';
-import { useT, useI18n } from '@/lib/i18n';
+import { Button, Overline, Pill, Spinner, useEscapeClose } from './ui';
+import { useT, useI18n, LOCALES, type Lang } from '@/lib/i18n';
 import type { Plan } from '@/types';
 
-// GET /billing/plans: plans + copy come localized from the server (one source).
-// checkout=false: no payment step exists right now -> the CTA is shown disabled.
+// GET /billing/plans: plans + their feature lists come localized from the server
+// (one source for what Premium really contains). checkout=false: no payment step
+// exists right now, so the CTA is shown disabled ("Coming soon").
 interface PlansResponse {
   plans: Plan[];
   checkout?: boolean;
+  provider?: string;
   copy?: { notice: string | null; unavailableCta: string; activated: string; disclaimer: string };
+}
+
+/** sessionStorage flag: "the visitor asked for Premium, then had to sign in first". */
+export const PREMIUM_INTENT_KEY = 'nw.intent.premium';
+function setIntent(on: boolean) {
+  try {
+    if (on) sessionStorage.setItem(PREMIUM_INTENT_KEY, '1');
+    else sessionStorage.removeItem(PREMIUM_INTENT_KEY);
+  } catch { /* storage blocked: the intent is simply not kept */ }
+}
+function hasIntent() {
+  try { return sessionStorage.getItem(PREMIUM_INTENT_KEY) === '1'; } catch { return false; }
+}
+
+function money(n: number, currency: string, lang: Lang) {
+  try {
+    return new Intl.NumberFormat(LOCALES[lang], { style: 'currency', currency, maximumFractionDigits: n % 1 ? 2 : 0 }).format(n);
+  } catch {
+    return `${n} ${currency}`;
+  }
 }
 
 export function Pricing() {
@@ -23,38 +45,57 @@ export function Pricing() {
   const open = useUI((s) => s.pricingOpen);
   const setPricing = useUI((s) => s.setPricing);
   const setLogin = useUI((s) => s.setLogin);
-  const { user, refresh, isPremium } = useAuth();
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [checkout, setCheckout] = useState(true);
-  const [copy, setCopy] = useState<PlansResponse['copy']>();
+  const loginOpen = useUI((s) => s.loginOpen);
+  const user = useAuth((s) => s.user);
+  const refresh = useAuth((s) => s.refresh);
+  const [data, setData] = useState<PlansResponse | null>(null);
+  const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const prevUser = useRef(user?.id);
 
   useEffect(() => {
     if (!open) return;
-    setMsg(null);
-    api.get<PlansResponse>(`/billing/plans?lang=${lang}`).then((r) => {
-      setPlans(r.plans);
-      setCheckout(r.checkout !== false);
-      setCopy(r.copy);
-    }).catch(() => {});
+    setErr(null);
+    setFailed(false);
+    api.get<PlansResponse>(`/billing/plans?lang=${lang}`).then(setData).catch(() => setFailed(true));
   }, [open, lang]);
   useEscapeClose(open, () => setPricing(false));
 
+  // Purchase intent survives the sign-in: back on the plans once signed in (WEB-17).
+  useEffect(() => {
+    const was = prevUser.current;
+    prevUser.current = user?.id;
+    if (!was && user && hasIntent()) {
+      setIntent(false);
+      setPricing(true);
+    }
+  }, [user, setPricing]);
+  // Sign-in closed without signing in: the intent is dropped.
+  useEffect(() => {
+    if (!loginOpen && !user && hasIntent() && !open) setIntent(false);
+  }, [loginOpen, user, open]);
+
   if (!open) return null;
+
+  const premium = !!user?.premium;
+  const pending = !!user?.cancelAtPeriodEnd;
+  const checkout = data?.checkout !== false;
+  const close = () => setPricing(false);
 
   const upgrade = async () => {
     if (!user) {
+      setIntent(true);
       setPricing(false);
       setLogin(true);
       return;
     }
     setBusy(true);
-    setMsg(null);
+    setErr(null);
     try {
-      const r = await api.post<{ activated?: boolean; url?: string; message?: string }>(`/billing/checkout?lang=${lang}`, { plan: 'premium' });
+      const r = await api.post<{ activated?: boolean; resumed?: boolean; url?: string }>(`/billing/checkout?lang=${lang}`, { plan: 'premium' });
       if (r.url) {
-        // Stripe: redirect to hosted checkout (premium granted by the webhook).
+        // Stripe: hosted checkout (Premium is granted by the webhook).
         window.location.href = r.url;
         return;
       }
@@ -62,83 +103,100 @@ export function Pricing() {
         await refresh();
         await useCatalog.getState().loadMeta();
         await useCatalog.getState().loadChannels();
-        setMsg(r.message || copy?.activated || null);
-        setTimeout(() => setPricing(false), 1200);
+        toast(t(r.resumed ? 'pages.pricing.resumed' : 'toast.premiumOn'), { ok: true });
+        setPricing(false);
       }
     } catch (e) {
-      setMsg(e instanceof ApiError ? e.message : "Paiement indisponible");
+      const code = e instanceof ApiError ? (e.data as { code?: string } | null)?.code : null;
+      setErr(code === 'checkout_unavailable' ? t('pages.pricing.closed') : code === 'already_premium' ? t('pricing.isOn') : t('pages.pricing.failed'));
     } finally {
       setBusy(false);
     }
   };
 
-  const premium = plans.find((p) => p.id === 'premium');
+  // The one primary of this dialog, by state.
+  const cta = premium && !pending ? null
+    : pending ? { label: t('pages.pricing.resume'), disabled: false }
+      : !checkout ? { label: t('pages.pricing.soon'), disabled: true }
+        : user ? { label: t('pricing.start'), disabled: false }
+          : { label: t('pricing.signInToStart'), disabled: false };
+
+  const notice = !checkout ? t('pages.pricing.closed') : data?.provider === 'mock' ? t('pages.pricing.test') : null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-black/80 p-4" onClick={() => setPricing(false)}>
-      <div className="my-auto w-full max-w-2xl rounded-2xl border border-white/10 bg-panel p-6 shadow-2xl animate-fade-in" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-1 flex items-center gap-2">
-          <Crown className="text-amber-400" size={20} />
-          <h2 className="text-lg font-bold text-ink">Passez à NEOWATCH Premium</h2>
-          <button onClick={() => setPricing(false)} className="ml-auto rounded-lg p-1.5 text-ink/50 hover:bg-white/5">
-            <X size={18} />
-          </button>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-[var(--scrim-panneau)] p-4 backdrop-blur-sm" onClick={close}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pricing-title"
+        className="my-auto w-full max-w-2xl rounded-card border border-line bg-[var(--surface-panneau)] p-[var(--pad-panneau)] shadow-menu animate-fade-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-1 flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <Overline>{t('pricing.overline')}</Overline>
+            <h2 id="pricing-title" className="m-0 mt-1 text-titre2 font-semibold text-ink">{t('pages.pricing.title')}</h2>
+          </div>
+          <Button variant="quiet" iconOnly onClick={close} aria-label={t('common.close')} title={t('common.close')} icon={<X size={18} aria-hidden="true" />} />
         </div>
-        <p className="mb-5 text-sm text-ink/50">{t('pricing.description')}</p>
+        <p className="mb-5 mt-2 text-corps text-ink-2">{t('pricing.description')}</p>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          {plans.map((p) => (
-            <div
-              key={p.id}
-              className={clsx(
-                'relative flex flex-col rounded-2xl border p-4',
-                p.id === 'premium'
-                  ? 'border-accent/50 bg-gradient-to-b from-accent/[0.12] to-accent/[0.02] shadow-xl shadow-accent/10 ring-1 ring-accent/20'
-                  : 'border-white/[0.08] bg-white/[0.02]'
-              )}
-            >
-              {p.id === 'premium' && (
-                <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 rounded-full bg-accent px-2.5 py-0.5 text-[10px] font-bold text-black shadow-lg">
-                  RECOMMANDÉ
-                </span>
-              )}
-              <div className="flex items-center gap-2">
-                {p.id === 'premium' ? <Crown size={16} className="text-amber-400" /> : <Sparkles size={16} className="text-ink/50" />}
-                <h3 className="font-semibold text-ink">{p.name}</h3>
-              </div>
-              <div className="my-2 flex items-baseline gap-1">
-                <span className="text-2xl font-bold text-ink">{p.price === 0 ? 'Gratuit' : `${p.price} ${p.currency}`}</span>
-                {p.period && <span className="text-xs text-ink/40">/{p.period}</span>}
-              </div>
-              <ul className="mb-4 flex-1 space-y-1.5">
-                {p.features.map((f, i) => (
-                  <li key={i} className="flex items-start gap-2 text-[12px] text-ink/70">
-                    <Check size={13} className={clsx('mt-0.5 shrink-0', p.id === 'premium' ? 'text-accent' : 'text-ink/40')} />
-                    {f}
-                  </li>
-                ))}
-              </ul>
-              {p.id === 'premium' ? (
-                <button
-                  onClick={upgrade}
-                  disabled={busy || isPremium() || !checkout}
-                  className="flex items-center justify-center gap-2 rounded-lg bg-accent py-2.5 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-50"
+        {!data && !failed ? (
+          <div className="flex justify-center py-10"><Spinner /></div>
+        ) : failed || !data ? (
+          <p className="rounded-field border border-line px-4 py-6 text-center text-sous text-ink-2">{t('pages.pricing.loadFailed')}</p>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {data.plans.map((p) => {
+              const isPremiumPlan = p.id === 'premium';
+              const mine = isPremiumPlan ? premium : !premium;
+              return (
+                <section
+                  key={p.id}
+                  aria-labelledby={`plan-${p.id}`}
+                  className={clsx('flex flex-col rounded-card border p-4', isPremiumPlan ? 'border-line-strong bg-[var(--bg-2)]' : 'border-line bg-[var(--bg-1)]')}
                 >
-                  {busy ? <Loader2 size={16} className="animate-spin" /> : <Crown size={16} />}
-                  {isPremium() ? 'Déjà Premium' : !checkout ? copy?.unavailableCta : user ? 'Passer Premium' : 'Se connecter pour souscrire'}
-                </button>
-              ) : (
-                <div className="rounded-lg border border-white/10 py-2.5 text-center text-xs text-ink/40">Plan actuel par défaut</div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {msg && <p className="mt-4 rounded-lg bg-white/[0.04] px-3 py-2 text-center text-sm text-ink/80">{msg}</p>}
-        {copy?.notice && !isPremium() && <p className="mt-4 text-center text-sm text-ink/60">{copy.notice}</p>}
-        {premium && copy?.disclaimer && (
-          <p className="mt-3 text-center text-[11px] text-ink/30">{copy.disclaimer}</p>
+                  <div className="flex items-center gap-2">
+                    <h3 id={`plan-${p.id}`} className="m-0 text-carte font-semibold text-ink" translate="no">{p.name}</h3>
+                    {mine && <Pill tone="ok" className="ml-auto">{t('pill.currentPlan')}</Pill>}
+                  </div>
+                  <p className="my-2 flex items-baseline gap-1.5">
+                    <span className="text-titre2 font-semibold text-ink">{money(p.price, p.currency, lang)}</span>
+                    {p.price > 0 && p.period && <span className="text-sous text-ink-3" translate="no">/ {p.period}</span>}
+                  </p>
+                  {/* Feature lists are the server's localized copy (one source for EN/FR/RU). */}
+                  <ul className="mb-4 mt-0 flex-1 list-none space-y-2 p-0" translate="no">
+                    {p.features.map((f, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sous text-ink-2">
+                        <Check size={14} className="mt-1 shrink-0 text-ink-3" aria-hidden="true" />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                  {isPremiumPlan && (cta ? (
+                    <Button
+                      variant="primary"
+                      onClick={upgrade}
+                      disabled={busy || cta.disabled}
+                      aria-disabled={cta.disabled || undefined}
+                      aria-label={cta.label}
+                      className="w-full"
+                    >
+                      {busy && <Spinner className="h-4 w-4" />}
+                      {cta.label}
+                    </Button>
+                  ) : (
+                    <p className="m-0 text-center text-sous text-ink-2">{t('pricing.isOn')}</p>
+                  ))}
+                </section>
+              );
+            })}
+          </div>
         )}
+
+        {err && <p role="alert" className="mb-0 mt-4 rounded-field border border-[var(--red)] px-3 py-2 text-center text-sous text-red">{err}</p>}
+        {notice && !premium && <p className="mb-0 mt-4 text-center text-sous text-ink-2">{notice}</p>}
+        <p className="mb-0 mt-3 text-center text-meta text-ink-3">{t('pricing.footer')}</p>
       </div>
     </div>
   );

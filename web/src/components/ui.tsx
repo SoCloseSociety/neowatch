@@ -112,7 +112,7 @@ export function HealthPill({ status, geo, className }: { status: HealthStatus; g
   }
   if (status === 'offline') {
     return (
-      <Pill className={clsx('text-ink-3', className)}>
+      <Pill className={clsx('text-ink-2', className)}>
         <span aria-hidden="true">○</span>
         {t('pill.offAir')}
       </Pill>
@@ -164,7 +164,6 @@ export function EmptyState({
   icon,
   title,
   body,
-  hint,
   action,
   className,
 }: {
@@ -172,17 +171,14 @@ export function EmptyState({
   title: string;
   /** One `--t2` sentence. */
   body?: string;
-  /** @deprecated use `body` (kept for ChannelGrid until Lot A). */
-  hint?: string;
   action?: EmptyAction;
   className?: string;
 }) {
-  const text = body ?? hint;
   return (
     <div data-empty="" className={clsx('flex flex-col items-center justify-center gap-3 py-20 text-center', className)}>
       {icon && <div className="text-ink-3" aria-hidden="true">{icon}</div>}
       <p className="text-carte font-semibold text-ink">{title}</p>
-      {text && <p className="max-w-sm text-sous text-ink-2">{text}</p>}
+      {body && <p className="max-w-sm text-sous text-ink-2">{body}</p>}
       {action && (
         <Button variant={action.variant || 'secondary'} onClick={action.onClick} className="mt-2">
           {action.label}
@@ -235,11 +231,6 @@ export function Spinner({ className }: { className?: string }) {
   return <div className={clsx('h-5 w-5 animate-spin rounded-full border-2 border-line-strong border-t-ink-2', className)} />;
 }
 
-/** Static placeholder block (no shimmer: nothing animates while loading). */
-export function Skeleton({ className }: { className?: string }) {
-  return <div aria-hidden="true" className={clsx('rounded-field bg-[var(--bg-2)]', className)} />;
-}
-
 export function CardSkeleton() {
   return (
     <div aria-hidden="true" className="overflow-hidden rounded-card border border-line bg-[var(--surface-carte)]">
@@ -250,25 +241,4 @@ export function CardSkeleton() {
       </div>
     </div>
   );
-}
-
-// ── Backward-compatible exports (remove once Lots A/B stop using them) ──
-/** @deprecated Status dot; use HealthPill. */
-export function LiveDot({ status }: { status: HealthStatus }) {
-  const map: Record<HealthStatus, string> = {
-    online: 'bg-live',
-    offline: 'bg-ink-3',
-    checking: 'bg-gold',
-    unknown: 'bg-ink-3',
-  };
-  return <span className={clsx('inline-block h-2 w-2 shrink-0 rounded-full', map[status])} />;
-}
-
-/**
- * @deprecated Use HealthPill. Kept with the old props (ChannelCard, Player)
- * and drawn with the pill rules (12 px floor). `latency` is ignored: "ms" is
- * jargon on screen (spec 2.4).
- */
-export function HealthBadge({ status }: { status: HealthStatus; latency?: number }) {
-  return <HealthPill status={status} />;
 }

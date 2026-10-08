@@ -20,7 +20,7 @@ CanalPlus.fr Teva.fr ParisPremiere.fr RTL9.fr Numero23.fr ChantFrance.fr"
     grep -h "xmltv_id=\"${id}@" "$SRC" 2>/dev/null
   done | sort -u
   echo '</channels>'
-} > "$OUT"
+} > "$OUT.tmp.$$" && mv -f "$OUT.tmp.$$" "$OUT"   # atomic: grab.sh may read it at any time
 
 echo "curated channels written: $(grep -c '<channel' "$OUT") -> $OUT"
 
@@ -36,5 +36,5 @@ BLUE_POP="BFMTV.fr C8.fr"
     grep -h "xmltv_id=\"${id}@" "$BLUE_SRC" 2>/dev/null | head -1
   done
   echo '</channels>'
-} > "$BLUE_OUT"
+} > "$BLUE_OUT.tmp.$$" && mv -f "$BLUE_OUT.tmp.$$" "$BLUE_OUT"
 echo "curated blue.ch channels written: $(grep -c '<channel' "$BLUE_OUT") -> $BLUE_OUT"

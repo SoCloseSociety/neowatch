@@ -1,274 +1,433 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, Lock, Plus, Crown, Sparkles, Info } from 'lucide-react';
+import { Play, Shuffle, CloudOff } from 'lucide-react';
 import { api } from '@/lib/api';
-import { fetchNowNext, fmtTime, type NowNext } from '@/lib/epg';
-import type { Channel, HomeData, Filters } from '@/types';
+import { fetchNowNext, type NowNext } from '@/lib/epg';
+import { categoryLabel } from '@/lib/format';
+import { fmtAge, fmtTime, hasKey, useI18n, useT } from '@/lib/i18n';
+import type { Channel, Filters, HomeData, HomeRail } from '@/types';
 import { useCatalog } from '@/store/catalogStore';
-import { useUI } from '@/store/uiStore';
+import { useUI, toast } from '@/store/uiStore';
 import { usePlayer } from '@/store/playerStore';
-import { useAuth } from '@/store/authStore';
-import { useT, useI18n } from '@/lib/i18n';
-import { Rail } from './Rail';
-import { CardSkeleton } from './ui';
+import { usePrefs } from '@/store/prefsStore';
+import { effectiveTheme, useSettings } from '@/store/settingsStore';
+import { Rail, ROW_MAX } from './Rail';
+import { countryLabel, languageLabel, monogram, qualityLabel, type PlayFn } from './ChannelCard';
+import { Button, CardSkeleton, EmptyState, LivePill, Meta } from './ui';
+import { insideTvShell } from './Install';
 
-const TILES: { label: string; icon: string; art: string; cat: string; apply: Partial<Filters> }[] = [
-  { label: 'Foot', icon: '⚽', art: 'foot', cat: 'sports', apply: { foot: true } },
-  { label: 'Sport', icon: '🏆', art: 'sports', cat: 'sports', apply: { category: 'sports' } },
-  { label: 'Actu', icon: '📰', art: 'news', cat: 'news', apply: { category: 'news' } },
-  { label: 'Films', icon: '🎬', art: 'movies', cat: 'movies', apply: { category: 'movies' } },
-  { label: 'Séries', icon: '📺', art: 'series', cat: 'series', apply: { category: 'series' } },
-  { label: 'Enfants', icon: '🧸', art: 'kids', cat: 'kids', apply: { category: 'kids' } },
-  { label: 'Musique', icon: '🎵', art: 'music', cat: 'music', apply: { category: 'music' } },
-  { label: 'Docs', icon: '🌍', art: 'documentary', cat: 'documentary', apply: { category: 'documentary' } },
+// Home (spec 2.2, 2.3): a hero of at most 45 % of the screen so row 1 shows in
+// the first screen, then rows of 8 cards + "See all", the Browse row of
+// categories, and the footer. No rotation, no Ken Burns: the channel you read is
+// the channel "Watch now" plays.
+
+type Featured = HomeData['featured'][number];
+
+// Hero artwork by the channel's OWN category, never by rail (DESIGN-1). Anything
+// else gets the logo window. /hero.webp is never used here.
+const AMBIANCE: Record<string, string> = {
+  sports: 'sport', foot: 'sport',
+  movies: 'cinema', series: 'cinema', animation: 'cinema', classic: 'cinema',
+  music: 'music',
+  news: 'news', business: 'news', weather: 'news', legislative: 'news', documentary: 'news',
+};
+function ambianceOf(ch: Featured | null): string | null {
+  if (!ch) return null;
+  const c0 = ch.categories?.[0];
+  if (c0 && AMBIANCE[c0]) return `/ambiance/${AMBIANCE[c0]}.webp`;
+  // The server's heroCategory counts only when the channel really carries it.
+  const hc = ch.heroCategory;
+  if (hc && ch.categories?.includes(hc) && AMBIANCE[hc]) return `/ambiance/${AMBIANCE[hc]}.webp`;
+  return null;
+}
+
+// A complete filter patch, so a tile or "See all" replaces the view instead of merging.
+const VIEW: Partial<Filters> = { category: null, country: null, language: null, q: '', foot: false, favoritesOnly: false, onlineOnly: false, hideGeoBlocked: false };
+
+const TILES: { key: string; cat: string; art: string; apply: Partial<Filters> }[] = [
+  { key: 'foot', cat: 'sports', art: 'foot', apply: { ...VIEW, foot: true } },
+  { key: 'sports', cat: 'sports', art: 'sports', apply: { ...VIEW, category: 'sports' } },
+  { key: 'news', cat: 'news', art: 'news', apply: { ...VIEW, category: 'news' } },
+  { key: 'movies', cat: 'movies', art: 'movies', apply: { ...VIEW, category: 'movies' } },
+  { key: 'series', cat: 'series', art: 'series', apply: { ...VIEW, category: 'series' } },
+  { key: 'kids', cat: 'kids', art: 'kids', apply: { ...VIEW, category: 'kids' } },
+  { key: 'music', cat: 'music', art: 'music', apply: { ...VIEW, category: 'music' } },
+  { key: 'documentary', cat: 'documentary', art: 'documentary', apply: { ...VIEW, category: 'documentary' } },
 ];
 
-const AMBIANCE: Record<string, string> = {
-  foot: 'sport', sports: 'sport', movies: 'cinema', series: 'cinema',
-  music: 'music', news: 'news', documentary: 'news', entertainment: 'news', general: 'news',
-};
+const STALE_MS = 30 * 60 * 1000; // signed links last 2 h; the server re-signs every 90 min
+let homeDefaultApplied = false; // prefs.home is applied once per page load (WEB-5)
 
-export function Home({ onPlay }: { onPlay: (ch: Channel) => void }) {
+const railCategory = (r: HomeRail) => (r.filter?.category as string | null) || (r.filter?.foot ? 'sports' : null);
+
+export function Home({ onPlay }: { onPlay: PlayFn }) {
+  const t = useT();
+  const lang = useI18n((s) => s.lang);
+  const navigate = useNavigate();
   const setFilters = useCatalog((s) => s.setFilters);
   const favorites = useCatalog((s) => s.favorites);
   const recents = useCatalog((s) => s.recents);
   const meta = useCatalog((s) => s.meta);
-  const toggleFavorite = useCatalog((s) => s.toggleFavorite);
-  const isFavorite = useCatalog((s) => s.isFavorite);
   const setPricing = useUI((s) => s.setPricing);
   const setInstall = useUI((s) => s.setInstall);
-  const openMulti = usePlayer((s) => s.openMulti);
   const homeVersion = useUI((s) => s.homeVersion);
-  const isPremium = useAuth((s) => s.isPremium());
-  const t = useT();
-  const lang = useI18n((s) => s.lang);
-  const navigate = useNavigate();
+  const openMulti = usePlayer((s) => s.openMulti);
+  const prefs = usePrefs((s) => s.prefs);
+  const prefsLoaded = usePrefs((s) => s.loaded);
+
   const [data, setData] = useState<HomeData | null>(null);
-  const [heroIdx, setHeroIdx] = useState(0);
-  const [featEpg, setFeatEpg] = useState<Record<string, NowNext>>({});
+  const [failed, setFailed] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [epg, setEpg] = useState<Record<string, NowNext>>({});
+  const [heroKey, setHeroKey] = useState<string | null>(null);
+  const loadedAt = useRef(0);
 
-  // Language-aware home: channels in the viewer's language are boosted to the top.
+  // Home payload (localized rail titles via ?lang). A failed refresh keeps the
+  // rows already shown; a failed first load shows one honest state + Retry.
   useEffect(() => {
     let alive = true;
-    api.get<HomeData>(`/catalog/home?lang=${lang}`).then((d) => alive && setData(d)).catch(() => alive && setData({ rails: [], featured: [] }));
-    return () => { alive = false; };
-  }, [homeVersion, lang]);
+    api
+      .get<HomeData>(`/catalog/home?lang=${lang}`)
+      .then((d) => {
+        if (!alive) return;
+        loadedAt.current = Date.now();
+        setData({ rails: d.rails || [], featured: d.featured || [] });
+        setFailed(false);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setFailed(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [homeVersion, lang, reload]);
 
+  // WEB-22: a TV left on Home refetches before its signed links expire, and
+  // when it comes back to the foreground with an old payload.
   useEffect(() => {
-    if (!data?.featured?.length) return;
-    const t = setInterval(() => setHeroIdx((i) => (i + 1) % data.featured.length), 7000);
-    return () => clearInterval(t);
-  }, [data]);
+    const check = () => {
+      if (document.visibilityState === 'visible' && loadedAt.current && Date.now() - loadedAt.current > STALE_MS) setReload((n) => n + 1);
+    };
+    const iv = setInterval(check, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, []);
 
-  // Now/next for the featured "live now" channels (enriches their rail cards).
+  // WEB-5: premium curation. Hidden categories drop rows, tiles and cards;
+  // pinned categories come first (in the order the user pinned them).
+  const hidden = useMemo(() => new Set(prefs.hiddenCategories), [prefs.hiddenCategories]);
+  const pinRank = useCallback(
+    (cat: string | null) => {
+      const i = cat ? prefs.pinnedCategories.indexOf(cat) : -1;
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+    },
+    [prefs.pinnedCategories]
+  );
+  const keep = useCallback((c: Channel) => !(c.categories?.length && c.categories.every((x) => hidden.has(x))), [hidden]);
+
+  const featured = useMemo(() => (data?.featured || []).filter(keep), [data, keep]);
+  const rails = useMemo(() => {
+    const list = (data?.rails || [])
+      .filter((r) => {
+        const cat = railCategory(r);
+        return !(cat && hidden.has(cat));
+      })
+      .map((r) => ({ ...r, channels: r.channels.filter(keep) }))
+      .filter((r) => r.channels.length);
+    return list.map((r, i) => ({ r, i })).sort((a, b) => pinRank(railCategory(a.r)) - pinRank(railCategory(b.r)) || a.i - b.i).map((x) => x.r);
+  }, [data, hidden, keep, pinRank]);
+  const tiles = useMemo(
+    () => TILES.filter((x) => !hidden.has(x.cat)).map((x, i) => ({ x, i })).sort((a, b) => pinRank(a.x.cat) - pinRank(b.x.cat) || a.i - b.i).map((v) => v.x),
+    [hidden, pinRank]
+  );
+
+  // WEB-5: the premium "default home" (a category / country / language), once.
   useEffect(() => {
-    const ids = (data?.featured || []).map((c) => c.channelId).filter(Boolean) as string[];
-    if (!ids.length) { setFeatEpg({}); return; }
+    if (!prefsLoaded || homeDefaultApplied) return;
+    homeDefaultApplied = true;
+    const h = prefs.home;
+    if (!(h.category || h.country || h.language || h.foot)) return;
+    if (/[?&](q|cat|country|lang|foot|online|sort)=/.test(window.location.search)) return;
+    setFilters({ ...VIEW, category: h.category, country: h.country, language: h.language, foot: !!h.foot });
+  }, [prefsLoaded, prefs.home, setFilters]);
+
+  // The hero channel: the first featured with artwork, else the first one. It
+  // stays the same across refreshes while it is still featured (no swap under a
+  // focused "Watch now").
+  const hero: Featured | null = useMemo(() => {
+    if (!featured.length) return null;
+    const kept = heroKey ? featured.find((f) => f.url === heroKey) : undefined;
+    return kept || featured.find((f) => ambianceOf(f)) || featured[0];
+  }, [featured, heroKey]);
+  useEffect(() => {
+    if (hero && hero.url !== heroKey) setHeroKey(hero.url);
+  }, [hero, heroKey]);
+
+  // Now / next for the featured channels (hero sentence + Live now cards),
+  // refetched when the hero programme ends (capped at 30 min).
+  const featIds = useMemo(() => featured.map((c) => c.channelId).filter(Boolean).join(','), [featured]);
+  const [epgTick, setEpgTick] = useState(0);
+  useEffect(() => {
+    if (!featIds) {
+      setEpg({});
+      return;
+    }
     let alive = true;
-    fetchNowNext(ids).then((m) => alive && setFeatEpg(m));
-    return () => { alive = false; };
-  }, [data]);
+    fetchNowNext(featIds.split(',')).then((m) => alive && setEpg(m));
+    return () => {
+      alive = false;
+    };
+  }, [featIds, epgTick]);
+  const heroNow = hero?.channelId ? epg[hero.channelId]?.now ?? null : null;
+  useEffect(() => {
+    if (!heroNow?.stop) return;
+    const wait = Math.min(Math.max(heroNow.stop - Date.now() + 5000, 15000), STALE_MS);
+    const id = setTimeout(() => setEpgTick((n) => n + 1), wait);
+    return () => clearTimeout(id);
+  }, [heroNow?.stop]);
 
-  const feat = data?.featured || [];
-  const hero = feat.length ? feat[heroIdx % feat.length] : null;
+  const play: PlayFn = (ch, opts) => (ch.locked ? setPricing(true) : onPlay(ch, opts));
+  const surprise = async () => {
+    try {
+      const ch = await api.get<Channel>('/catalog/random');
+      // Zapping goes on through the picks of the moment (the grid is not loaded on Home).
+      if (ch?.url) play(ch, { queue: [ch, ...featured] });
+      else toast(t('home.surpriseNone'));
+    } catch {
+      toast(t('home.surpriseNone'));
+    }
+  };
 
-  // Now/next for the spotlighted channel, reused from the featured EPG batch
-  // (no extra fetch on hero rotation).
-  const heroEpg = hero?.channelId ? featEpg[hero.channelId] : null;
-  const now = heroEpg?.now ?? null;
-  const progress = now && now.stop ? Math.min(100, Math.max(0, ((Date.now() - now.start) / (now.stop - now.start)) * 100)) : null;
-  const amb = hero?.railKey && AMBIANCE[hero.railKey] ? `/ambiance/${AMBIANCE[hero.railKey]}.webp` : null;
-  const heroBg = amb ? `url(${amb}), url(/hero.webp)` : 'url(/hero.webp)';
+  const openFavorites = () => {
+    setFilters({ ...VIEW, favoritesOnly: true }); // reloads the list (WEB-6)
+  };
+
   const catCount = (id: string) => meta?.categories.find((c) => c.id === id)?.count;
+  const footTotal = data?.rails.find((r) => r.key === 'foot')?.total;
+  const liveNowMeta = [t.n('count.channels', featured.length), t('row.pickedNow')];
 
   return (
-    <div className="pb-0">
-      {/* ============ HERO ============ */}
-      <section className="relative flex min-h-[clamp(460px,72vh,680px)] overflow-hidden">
-        <div key={amb || 'hero'} className="animate-kenburns absolute inset-0 animate-fade-in bg-cover bg-center" style={{ backgroundImage: heroBg }} />
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(10,14,20,.97)_0%,rgba(10,14,20,.82)_30%,rgba(10,14,20,.3)_64%,rgba(10,14,20,.6)_100%)]" />
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(0deg,rgb(var(--surface))_1%,transparent_46%)]" />
+    <div>
+      <Hero hero={hero} now={heroNow} onWatch={() => (hero ? play(hero, { queue: featured }) : surprise())} onSurprise={surprise} />
 
-        <div className="relative flex w-full flex-wrap items-end gap-7 px-[clamp(16px,2.6vw,40px)] pb-[clamp(28px,4vh,52px)] pt-[clamp(40px,9vh,96px)]">
-          <div className="flex max-w-[620px] flex-1 basis-full flex-col gap-4 sm:basis-[380px]">
-            <div className="flex items-center gap-3">
-              <span className="inline-flex items-center gap-2 rounded-[6px] bg-live px-2.5 py-1.5 font-mono text-[11px] font-bold tracking-[0.12em] text-white">
-                <span className="h-[7px] w-[7px] animate-pulse-red rounded-full bg-white" /> EN DIRECT
-              </span>
-              {hero && <span className="text-[13px] text-ink-2">{hero.railIcon} {hero.railTitle}</span>}
+      {/* Rows. A failed first load: one state with Retry (WEB-24). */}
+      {!data && failed ? (
+        <EmptyState
+          icon={<CloudOff size={40} strokeWidth={1.5} />}
+          title={t('home.error')}
+          body={t('home.errorBody')}
+          action={{ label: t('empty.tryAgain'), onClick: () => setReload((n) => n + 1) }}
+        />
+      ) : !data ? (
+        <RowSkeletons />
+      ) : (
+        <>
+          {featured.length > 0 && <Rail title={t('home.liveNow')} meta={liveNowMeta} channels={featured} onPlay={play} wide epg={epg} />}
+          {recents.length > 0 && <Rail title={t('home.resume')} meta={[t.n('count.channels', recents.length)]} channels={recents} onPlay={play} wide />}
+          {favorites.length > 0 && (
+            <Rail
+              title={t('home.myListTitle')}
+              meta={[t.n('count.channels', favorites.length)]}
+              channels={favorites}
+              total={favorites.length}
+              onPlay={play}
+              onSeeAll={favorites.length > ROW_MAX ? openFavorites : undefined}
+            />
+          )}
+          <Rail title={t('home.browseCategories')} meta={[t.n('count.categories', tiles.length)]}>
+            {tiles.map((tile) => (
+              <MediaTile
+                key={tile.key}
+                art={tile.art}
+                label={tile.key === 'foot' ? t('cat.foot') : categoryLabel(tile.cat)}
+                count={tile.key === 'foot' ? footTotal : catCount(tile.cat)}
+                onClick={() => setFilters(tile.apply)}
+              />
+            ))}
+          </Rail>
+          {rails.map((rail) => (
+            <Rail
+              key={rail.key}
+              title={hasKey(`rail.${rail.key}`) ? t(`rail.${rail.key}`) : rail.title}
+              meta={[t.n('count.channels', rail.total)]}
+              channels={rail.channels}
+              total={rail.total}
+              onPlay={play}
+              onSeeAll={() => setFilters({ ...VIEW, ...rail.filter })}
+            />
+          ))}
+        </>
+      )}
+
+      <footer className="mt-[calc(var(--ecart-rangees)*2)] border-t border-line px-[var(--gouttiere)] pb-12 pt-10">
+        <div className="flex flex-wrap gap-x-16 gap-y-10">
+          <div className="max-w-[300px]">
+            <div className="mb-3 flex items-center gap-2.5">
+              <span aria-hidden="true" className="h-2 w-2 rounded-full bg-[var(--red)]" />
+              <span translate="no" className="brand text-sous text-ink">NeoWatch</span>
             </div>
-            <h1 className="m-0 text-[clamp(34px,5.4vw,68px)] font-extrabold leading-[0.98] tracking-[-0.025em] text-ink">
-              {hero ? hero.name : <>{t('home.heroTitle1')} <span className="text-accent">{t('home.heroTitle2')}</span></>}
-            </h1>
-            <p className="m-0 max-w-[520px] text-[clamp(14px,1.4vw,16px)] text-ink-2">
-              {hero
-                ? `${hero.flag || '🌐'} ${hero.countryName || t('home.international')} · ${hero.categoryNames?.[0] || t('home.live')} · ${t('home.heroClip')}`
-                : t('home.heroTagline')}
-            </p>
-            {/* Now / next programme (when EPG is available for this channel) */}
-            {now && (
-              <div className="flex max-w-[520px] flex-col gap-2">
-                <div className="flex items-center gap-2.5 font-mono text-[10.5px] tracking-wide">
-                  <span className="font-bold text-accent">EN COURS</span>
-                  <span className="truncate text-ink-3">{fmtTime(now.start)}{now.stop ? `–${fmtTime(now.stop)}` : ''} · {now.title}</span>
-                </div>
-                {progress != null && (
-                  <div className="relative h-1 overflow-hidden rounded-full bg-white/15">
-                    <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-accent to-[#7C5CFC]" style={{ width: `${progress}%` }} />
-                  </div>
-                )}
-                {heroEpg?.next && <div className="truncate font-mono text-[11px] text-ink-3">À {fmtTime(heroEpg.next.start)} · {heroEpg.next.title}</div>}
-              </div>
-            )}
-            <div className="mt-1 flex flex-wrap items-center gap-2.5 sm:gap-3">
-              <button
-                onClick={() => (hero ? (hero.locked ? setPricing(true) : onPlay(hero)) : setFilters({}))}
-                className="flex h-12 items-center gap-2.5 rounded-[11px] bg-accent px-4 text-[13px] font-extrabold text-[#06151a] shadow-[0_12px_30px_-10px_rgba(34,211,238,.55)] hover:brightness-110 sm:px-6 sm:text-[15px]"
-              >
-                {hero?.locked ? <Lock size={18} /> : <Play size={18} fill="currentColor" />}
-                {hero?.locked ? t('common.premium') : t('home.watch')}
-              </button>
-              {hero && (
-                <>
-                  <button
-                    onClick={() => toggleFavorite(hero)}
-                    className="flex h-12 items-center gap-2 rounded-[11px] border border-white/[0.08] bg-white/[0.06] px-4 text-[13px] font-bold text-ink hover:bg-white/[0.12] sm:px-5 sm:text-[14px]"
-                  >
-                    <Plus size={17} /> {isFavorite(hero.url) ? t('home.inMyList') : t('home.myList')}
-                  </button>
-                  <button
-                    onClick={() => navigate(`/chaine/${hero.id}`)}
-                    aria-label={t('detail.info')}
-                    title={t('detail.info')}
-                    className="grid h-12 w-12 place-items-center rounded-[11px] border border-white/[0.08] bg-white/[0.06] text-ink hover:bg-white/[0.12]"
-                  >
-                    <Info size={18} />
-                  </button>
-                </>
+            <p className="m-0 text-sous text-ink-2">{t('footer.tagline')}</p>
+          </div>
+          <FooterCol
+            title={t('footer.explore')}
+            links={[
+              { label: t('footer.liveNow'), onClick: () => setFilters({ ...VIEW, onlineOnly: true }) },
+              { label: t('footer.programmeTv'), onClick: () => navigate('/programme-tv') },
+              { label: t('top.multi'), onClick: openMulti },
+              { label: t('footer.favorites'), onClick: openFavorites },
+            ]}
+          />
+          <FooterCol
+            title={t('footer.account')}
+            links={[
+              { label: t('top.premium'), onClick: () => setPricing(true) },
+              // Inside the Android app the app is already installed.
+              ...(insideTvShell() ? [] : [{ label: t('footer.installApp'), onClick: () => setInstall(true) }]),
+            ]}
+          />
+          <FooterCol
+            title={t('footer.legal')}
+            links={[
+              { label: t('footer.terms'), onClick: () => navigate('/legal#cgu') },
+              { label: t('footer.privacy'), onClick: () => navigate('/legal#confidentialite') },
+              { label: t('footer.source'), href: 'https://iptv-org.github.io' },
+            ]}
+          />
+        </div>
+        <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
+          <span className="text-sous text-ink-3">{t('footer.copyright', { year: String(new Date().getFullYear()) })}</span>
+          {meta && <Meta parts={[t.n('count.countries', meta.countries.length), t.n('count.channels', meta.total)]} />}
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+// ── Hero ────────────────────────────────────────────────────────────────
+function Hero({ hero, now, onWatch, onSurprise }: { hero: Featured | null; now: NowNext['now']; onWatch: () => void; onSurprise: () => void }) {
+  const t = useT();
+  useSettings((s) => s.theme); // re-render on a style switch
+  // The scrim tokens stay dark in Doux too: doubling them under the art keeps the
+  // text column dark, and the primary and the focus ring flip to light so they
+  // still stand out on it.
+  const heroStyle = {
+    background: 'var(--voile-hero), var(--voile-hero), var(--bg-0)',
+    ...(effectiveTheme() === 'doux'
+      ? { '--primaire-fond': 'var(--encre-image)', '--primaire-encre': 'var(--t1)', '--focus-anneau': 'var(--encre-image)', '--focus-halo': 'var(--t1)' }
+      : {}),
+  } as React.CSSProperties;
+  const amb = ambianceOf(hero);
+  const [logoFailed, setLogoFailed] = useState(false);
+  useEffect(() => setLogoFailed(false), [hero?.url]);
+  const cat = hero?.categories?.find((c) => c !== 'undefined');
+  const q = qualityLabel(hero?.quality);
+  const country = hero ? countryLabel(hero, t.lang) : null;
+  const heroLang = hero ? languageLabel(hero, t.lang) : null;
+  const sentence = !hero
+    ? t('home.heroEmptyBody')
+    : now?.stop
+    ? t('hero.until', { title: now.title, time: fmtTime(now.stop) })
+    : country
+    ? t('hero.liveFrom', { country })
+    : t('hero.onAir');
+
+  return (
+    <section
+      data-hero=""
+      className="relative flex h-[min(60vh,480px)] overflow-hidden sm:h-[min(45vh,420px)] [:root[data-tv]_&]:h-[calc(600*var(--u))]"
+      style={heroStyle}
+    >
+      {/* Visual: the category artwork in the right 62 % ("window"), else the logo window */}
+      <div aria-hidden="true" className="absolute inset-0 sm:left-[38%]">
+        {amb ? (
+          <div key={amb} className="absolute inset-0 animate-fade-in bg-cover bg-center" style={{ backgroundImage: `url(${amb})` }} />
+        ) : hero ? (
+          <div key={hero.url} className="absolute inset-0 flex animate-fade-in items-start justify-end p-4 sm:items-center sm:justify-center sm:p-8">
+            <div className="flex aspect-[520/320] w-[46%] max-w-[520px] items-center justify-center rounded-card bg-[var(--surface-carte)] shadow-[inset_0_0_0_1px_var(--line)] sm:w-[78%]">
+              {hero.logo && !logoFailed ? (
+                <img src={hero.logo} alt="" width={260} height={160} decoding="async" referrerPolicy="no-referrer" onError={() => setLogoFailed(true)} className="h-auto max-h-[56%] w-auto max-w-[64%] object-contain" />
+              ) : (
+                <span translate="no" className="font-mono text-titre font-semibold text-ink-2">{monogram(hero.name)}</span>
               )}
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* ============ CATEGORY TILES ============ */}
-      <div className="pt-[clamp(22px,3.5vh,34px)]">
-        <h2 className="mb-3.5 px-[clamp(16px,2.6vw,40px)] text-[19px] font-bold tracking-[-0.01em] text-ink">{t('home.browseCategories')}</h2>
-        <div className="nw-scroll flex gap-3.5 overflow-x-auto px-[clamp(16px,2.6vw,40px)] pb-1.5">
-          {TILES.map((tile) => {
-            const count = catCount(tile.cat);
-            return (
-              <button
-                key={tile.label}
-                onClick={() => setFilters(tile.apply)}
-                className="lift group relative h-[108px] w-[190px] shrink-0 overflow-hidden rounded-[14px] border border-white/[0.08] text-left"
-              >
-                <img src={`/tiles/${tile.art}.webp`} alt="" loading="lazy" decoding="async" width={190} height={108} className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-110" />
-                <div className="absolute inset-0 bg-[linear-gradient(0deg,rgba(8,11,17,.85)_4%,rgba(8,11,17,0)_55%)]" />
-                <div className="absolute bottom-2.5 left-3 right-3 flex items-end gap-2">
-                  <span className="text-[23px] leading-none drop-shadow">{tile.icon}</span>
-                  <span className="flex flex-col gap-0.5">
-                    <span className="text-[15px] font-bold text-white drop-shadow">{tile.label}</span>
-                    {count != null && <span className="font-mono text-[10px] tracking-wide text-white/60">{count.toLocaleString('fr')} {t('home.channelsCount')}</span>}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        ) : null}
       </div>
+      <div aria-hidden="true" className="scrim-hero pointer-events-none absolute inset-0" />
 
-      {/* ============ EN DIRECT MAINTENANT (cross-category featured) ============ */}
-      {feat.length > 0 && (
-        <Rail title={t('home.liveNow')} icon="🔴" channels={feat as Channel[]} onPlay={onPlay} wide epg={featEpg} />
-      )}
-
-      {/* ============ CLIENT RAILS ============ */}
-      {favorites.length > 0 && (
-        <Rail title={t('home.favorites')} icon="❤️" channels={favorites.slice(0, 30)} onPlay={onPlay} onSeeAll={() => { setFilters({ favoritesOnly: true }); useCatalog.getState().loadChannels(); }} />
-      )}
-      {recents.length > 0 && <Rail title={t('home.resume')} icon="↩️" channels={recents.slice(0, 30)} onPlay={onPlay} variant="resume" wide />}
-
-      {/* ============ SERVER RAILS ============ */}
-      {!data ? (
-        <div className="mt-[30px] space-y-7">
-          {[0, 1, 2].map((r) => (
-            <div key={r}>
-              <div className="mb-3 px-[clamp(16px,2.6vw,40px)]"><div className="h-4 w-44 rounded bg-white/[0.06]" /></div>
-              <div className="flex gap-4 px-[clamp(16px,2.6vw,40px)]">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="w-[208px] shrink-0"><CardSkeleton /></div>)}</div>
-            </div>
-          ))}
+      {/* Text column on the scrim: no chips behind text laid on the photo */}
+      <div className="relative flex w-full max-w-[calc(620px_+_var(--gouttiere))] flex-col justify-end gap-3 px-[var(--gouttiere)] pb-[clamp(16px,3.5vh,36px)]">
+        <div className="flex min-w-0 items-center gap-3">
+          {hero?.online === true && <LivePill pulse />}
+          {hero && (
+            <p className="overline m-0 min-w-0 truncate text-on-image opacity-80">
+              {cat && <span>{categoryLabel(cat)}</span>}
+              {cat && country && <span aria-hidden="true"> · </span>}
+              {country && <span translate="no">{country}</span>}
+            </p>
+          )}
         </div>
-      ) : (
-        data.rails.map((rail, i) => (
-          <div key={rail.key}>
-            <Rail
-              title={rail.title}
-              icon={rail.icon}
-              channels={rail.channels}
-              filter={rail.filter}
-              total={rail.total}
-              onPlay={onPlay}
-              wide={i === 0}
-              variant={rail.key === 'movies' || rail.key === 'series' ? 'poster' : 'card'}
-              seeAllLabel={`${t('home.seeAll')} (${rail.total.toLocaleString('fr')})`}
-              onSeeAll={() => setFilters(rail.filter)}
-            />
-            {/* Free-tier upsell, slotted after the first rail */}
-            {i === 0 && !isPremium && (
-              <div className="relative mx-[clamp(16px,2.6vw,40px)] mt-[30px] flex items-center gap-4 overflow-hidden rounded-[14px] border border-gold/30 bg-[linear-gradient(100deg,rgba(245,196,81,.1),rgba(245,196,81,.03))] px-5 py-4">
-                <span className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-[11px] bg-gold/[0.16] text-gold"><Crown size={20} fill="currentColor" /></span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[14px] font-bold text-ink">{t('home.freeBannerTitle')}</div>
-                  <div className="text-[12.5px] text-ink-2">{t('home.freeBannerSub')}</div>
-                </div>
-                <button onClick={() => setPricing(true)} className="flex h-[42px] shrink-0 items-center gap-2 rounded-[11px] bg-gold px-5 font-extrabold text-[13px] text-[#1a1407] hover:brightness-105">{t('home.goPremium')}</button>
-                <span className="absolute right-3 top-2 font-mono text-[8px] tracking-[0.14em] text-ink-3">{t('home.adLabel')}</span>
+        <h1 className="text-on-image m-0 line-clamp-2 text-titre font-semibold [text-wrap:balance]" translate={hero ? 'no' : undefined}>
+          {hero ? hero.name : t('home.heroEmptyTitle')}
+        </h1>
+        <p className="text-on-image m-0 line-clamp-2 max-w-[520px] text-corps opacity-90">{sentence}</p>
+        {hero && <span aria-hidden="true" className="thread" />}
+        <div className="mt-1 flex flex-wrap items-center gap-2.5">
+          <Button variant="primary" data-autofocus="" icon={<Play size={18} fill="currentColor" aria-hidden="true" />} onClick={onWatch}>
+            {t('home.watch')}
+          </Button>
+          <Button variant="secondary" icon={<Shuffle size={17} aria-hidden="true" />} onClick={onSurprise}>
+            {t('home.surprise')}
+          </Button>
+        </div>
+        {hero && (q || heroLang || hero.checkedAt) && (
+          <p className="meta text-on-image m-0 opacity-75">
+            {q && <span translate="no">{q}</span>}
+            {heroLang && <span translate="no">{heroLang}</span>}
+            {hero.checkedAt ? <span>{t('meta.checked', { age: fmtAge(hero.checkedAt) })}</span> : null}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ── Browse row: one media card per category (art under --voile-image, no emoji) ──
+function MediaTile({ art, label, count, onClick }: { art: string; label: string; count?: number; onClick: () => void }) {
+  const t = useT();
+  return (
+    <button type="button" onClick={onClick} className="lift card-surface w-[var(--carte-l)] shrink-0 snap-start self-start text-left">
+      <img src={`/tiles/${art}.webp`} alt="" width={288} height={162} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover" />
+      <span aria-hidden="true" className="absolute inset-0" style={{ background: 'var(--voile-image)' }} />
+      <span className="absolute inset-x-0 bottom-0 flex flex-col gap-0.5 p-[var(--pad-carte)]">
+        <span className="text-on-image text-carte font-semibold">{label}</span>
+        {count != null && <span className="text-on-image font-mono text-meta opacity-80">{t.n('count.channels', count)}</span>}
+      </span>
+    </button>
+  );
+}
+
+function RowSkeletons() {
+  return (
+    <div aria-hidden="true">
+      {[0, 1, 2].map((r) => (
+        <div key={r} className="mt-[var(--ecart-rangees)]">
+          <div className="mb-3 px-[var(--gouttiere)]">
+            <div className="h-4 w-44 rounded bg-[var(--bg-2)]" />
+          </div>
+          <div className="flex gap-[var(--ecart-cartes)] overflow-hidden pl-[var(--gouttiere)]">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="w-[var(--carte-l)] shrink-0">
+                <CardSkeleton />
               </div>
-            )}
+            ))}
           </div>
-        ))
-      )}
-
-      {data && !data.rails.length && (
-        <div className="flex flex-col items-center gap-2 py-16 text-center text-ink-3">
-          <Sparkles size={32} /> <span className="text-sm">{t('home.loading')}</span>
         </div>
-      )}
-
-      {/* ============ FOOTER ============ */}
-      <footer className="mt-12 border-t border-white/[0.08] bg-black/40 px-[clamp(16px,2.6vw,40px)] pb-12 pt-10">
-        <div className="flex flex-wrap gap-x-16 gap-y-10">
-          <div className="max-w-[280px]">
-            <div className="mb-3 flex items-center gap-2.5">
-              <span className="inline-flex h-2.5 w-2.5 rounded-full bg-live shadow-live shadow-[0_0_10px_rgba(255,59,71,0.9)]" />
-              <span className="text-[16px] font-extrabold tracking-[0.16em] text-ink">NEO<span className="text-accent">WATCH</span></span>
-            </div>
-            <p className="m-0 text-[12.5px] leading-relaxed text-ink-2">{t('footer.tagline')}</p>
-          </div>
-          <FooterCol title={t('footer.explore')} links={[
-            { label: t('footer.liveNow'), onClick: () => { navigate('/'); setFilters({ onlineOnly: true, favoritesOnly: false, category: null, country: null, language: null, q: '', foot: false }); } },
-            { label: t('footer.programmeTv'), onClick: () => navigate('/programme-tv') },
-            { label: t('top.multi'), onClick: openMulti },
-            { label: t('footer.favorites'), onClick: () => { navigate('/'); setFilters({ favoritesOnly: true }); } },
-          ]} />
-          <FooterCol title={t('footer.account')} links={[
-            { label: t('footer.favorites'), onClick: () => { navigate('/'); setFilters({ favoritesOnly: true }); } },
-            { label: t('top.premium'), onClick: () => setPricing(true) },
-            { label: t('footer.importPlaylist'), onClick: () => setPricing(true) },
-            { label: t('footer.installApp'), onClick: () => setInstall(true) },
-          ]} />
-          <FooterCol title={t('footer.legal')} links={[
-            { label: t('footer.terms'), onClick: () => navigate('/legal#cgu') },
-            { label: t('footer.privacy'), onClick: () => navigate('/legal#confidentialite') },
-            { label: t('footer.source'), href: 'https://iptv-org.github.io' },
-          ]} />
-        </div>
-        <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] pt-5 font-mono text-[11px] tracking-wide text-ink-3">
-          <span>© {new Date().getFullYear()} NEOWATCH · Flux librement accessibles via iptv-org</span>
-          {meta && <span>{meta.countries.length} pays · {meta.total.toLocaleString('fr')} chaînes</span>}
-        </div>
-      </footer>
+      ))}
     </div>
   );
 }
@@ -277,12 +436,16 @@ type FooterLink = { label: string; onClick?: () => void; href?: string };
 function FooterCol({ title, links }: { title: string; links: FooterLink[] }) {
   return (
     <div className="flex flex-col items-start gap-2.5">
-      <div className="mb-0.5 font-mono text-[10px] font-bold tracking-[0.18em] text-ink-3">{title}</div>
+      <p className="overline m-0 mb-0.5">{title}</p>
       {links.map((l) =>
         l.href ? (
-          <a key={l.label} href={l.href} target="_blank" rel="noopener noreferrer" className="text-left text-[12.5px] text-ink-2 transition-colors hover:text-accent">{l.label}</a>
+          <a key={l.label} href={l.href} target="_blank" rel="noopener noreferrer" className="text-sous text-ink-2 hover:text-ink">
+            {l.label}
+          </a>
         ) : (
-          <button key={l.label} onClick={l.onClick} className="text-left text-[12.5px] text-ink-2 transition-colors hover:text-accent focus-visible:text-accent focus-visible:outline-none">{l.label}</button>
+          <button key={l.label} type="button" onClick={l.onClick} className="text-left text-sous text-ink-2 hover:text-ink">
+            {l.label}
+          </button>
         )
       )}
     </div>

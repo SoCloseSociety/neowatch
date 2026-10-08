@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
-import { X, Volume2, VolumeX, Trash2, Grip, LayoutGrid, Maximize2 } from 'lucide-react';
+import { X, Volume2, VolumeX, LayoutGrid, Maximize2 } from 'lucide-react';
 import { HlsVideo } from './HlsVideo';
-import { usePlayer } from '@/store/playerStore';
-import { useT } from '@/lib/i18n';
+import { EmptyState, Spinner } from './ui';
+import { usePlayer, MAX_TILES } from '@/store/playerStore';
+import { toast } from '@/store/uiStore';
+import { useT, fmtNum } from '@/lib/i18n';
+import { isTV } from '@/lib/device';
 
-// Grid layout chosen by tile count for a balanced mosaic. Fewer columns on
-// small screens so tiles stay readable and D-pad focusable.
+// Multi-view (spec 2.6): up to 9 live tiles, one with sound. It is a layer
+// (spatialNav): Back closes it, the D-pad moves between tiles, the focus comes
+// back where it was. Tiles are re-resolved on open (live links) before mounting.
+
+// Balanced grid by tile count; fewer columns on small screens.
 function gridClass(n: number, width: number): string {
   const small = width < 700;
   if (n <= 1) return 'grid-cols-1';
@@ -17,126 +23,178 @@ function gridClass(n: number, width: number): string {
 }
 
 export function MultiView() {
-  const { multi, activeAudio, multiOpen, removeFromMulti, clearMulti, closeMulti, setActiveAudio } = usePlayer();
+  const multi = usePlayer((s) => s.multi);
+  const ready = usePlayer((s) => s.multiReady);
+  const activeAudio = usePlayer((s) => s.activeAudio);
+  const multiOpen = usePlayer((s) => s.multiOpen);
+  const { removeFromMulti, clearMulti, restoreMulti, closeMulti, setActiveAudio } = usePlayer.getState();
   const [layout, setLayout] = useState<'mosaic' | 'focus'>('mosaic');
   const [width, setWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280));
   const t = useT();
+  const tv = isTV();
 
-  // Back/Escape (TV remote) closes the mosaic.
-  useEffect(() => {
-    if (!multiOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMulti(); };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [multiOpen, closeMulti]);
-
-  // Re-pick the mosaic layout on resize / rotate (tablet portrait <-> landscape).
+  // Re-pick the layout on resize / rotate (tablet portrait <-> landscape).
   useEffect(() => {
     const onResize = () => setWidth(window.innerWidth);
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
-    return () => { window.removeEventListener('resize', onResize); window.removeEventListener('orientationchange', onResize); };
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
   }, []);
 
   if (!multiOpen) return null;
 
-  // Empty state: the button still "works" -- explain how to populate the mosaic.
-  if (multi.length === 0) {
-    return (
-      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black px-6 text-center animate-fade-in">
-        <button onClick={closeMulti} className="absolute right-4 top-4 rounded-lg p-2 text-ink/60 hover:bg-white/5 hover:text-ink" aria-label={t('common.close')}><X size={20} /></button>
-        <Grip size={40} className="text-accent" />
-        <h2 className="text-lg font-bold text-ink">{t('multi.title')}</h2>
-        <p className="max-w-sm text-sm text-ink/60">{t('multi.emptyBody')}</p>
-        <button onClick={closeMulti} className="rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-[#06151a] hover:brightness-110">{t('multi.browse')}</button>
-      </div>
-    );
-  }
+  const clear = () => {
+    const before = usePlayer.getState().multi;
+    const audio = usePlayer.getState().activeAudio;
+    clearMulti();
+    toast(t('shell.multiCleared'), { undo: () => restoreMulti(before, audio) });
+  };
+  const remove = (url: string, name: string) => {
+    const before = usePlayer.getState().multi;
+    const audio = usePlayer.getState().activeAudio;
+    removeFromMulti(url);
+    toast(t('shell.tileRemoved', { name }), { undo: () => restoreMulti(before, audio) });
+  };
 
-  // Focus layout: the active-audio tile (or the first) spans 2x2, the rest tile around it.
+  // Focus layout: the tile with sound (or the first) spans 2x2.
   const focusUrl = activeAudio && multi.some((c) => c.url === activeAudio) ? activeAudio : multi[0]?.url;
   const canFocus = multi.length >= 3;
+  const focusLayout = layout === 'focus' && canFocus;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black animate-fade-in">
+    <div data-layer="multi" role="dialog" aria-modal="true" aria-labelledby="nw-multi-title" className="fixed inset-0 z-50 flex flex-col bg-[var(--e-fond)] animate-fade-in">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-white/[0.06] bg-surface/80 px-4 py-2.5">
-        <Grip size={16} className="text-accent" />
-        <h2 className="text-sm font-semibold text-ink">{t('multi.title')}</h2>
-        <span className="rounded bg-accent/15 px-2 py-0.5 font-mono text-[10px] text-accent">{multi.length}/9</span>
-        <span className="hidden text-[11px] text-ink/40 sm:inline">{t('multi.hint')}</span>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-[var(--bg-1)] px-[var(--gouttiere)] py-3">
+        <div className="min-w-0">
+          <h2 id="nw-multi-title" className="text-carte font-semibold text-ink">
+            {t('multi.title')}
+          </h2>
+          {multi.length > 0 && (
+            <p className="meta">
+              {t('shell.tilesOf', { n: fmtNum(multi.length), max: fmtNum(MAX_TILES) })}
+              <span className="hidden md:inline"> · {t('shell.multiHint')}</span>
+            </p>
+          )}
+        </div>
         <div className="ml-auto flex items-center gap-2">
           {canFocus && (
-            <button
-              onClick={() => setLayout((l) => (l === 'mosaic' ? 'focus' : 'mosaic'))}
-              className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] text-ink/60 hover:border-accent/30 hover:text-accent"
-              title={t('multi.layout')}
-            >
-              {layout === 'focus' ? <LayoutGrid size={14} /> : <Maximize2 size={14} />}
-              <span className="hidden sm:inline">{layout === 'focus' ? t('multi.mosaic') : t('multi.focus')}</span>
+            <button type="button" onClick={() => setLayout((l) => (l === 'mosaic' ? 'focus' : 'mosaic'))} className="btn btn-secondary" aria-label={t('multi.layout')} title={t('multi.layout')}>
+              {focusLayout ? <LayoutGrid size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}
+              <span className="hidden sm:inline">{focusLayout ? t('multi.mosaic') : t('multi.focus')}</span>
             </button>
           )}
-          <button
-            onClick={clearMulti}
-            className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] text-ink/60 hover:border-rose-500/30 hover:text-rose-400"
-          >
-            <Trash2 size={14} /> {t('multi.clear')}
-          </button>
-          <button onClick={closeMulti} className="rounded-lg p-2 text-ink/60 hover:bg-white/5 hover:text-ink" aria-label={t('common.close')}>
-            <X size={18} />
+          {multi.length > 0 && (
+            <button type="button" onClick={clear} className="btn btn-quiet">
+              {t('multi.clear')}
+            </button>
+          )}
+          <button type="button" onClick={closeMulti} className="btn btn-secondary btn-icon" aria-label={t('common.close')} title={t('common.close')}>
+            <X size={20} aria-hidden="true" />
           </button>
         </div>
       </div>
 
-      {/* Mosaic */}
-      <div className={clsx('grid flex-1 gap-1 p-1', layout === 'focus' && canFocus ? 'auto-rows-fr grid-cols-3' : gridClass(multi.length, width))}>
-        {multi.map((ch, idx) => {
-          const isAudio = activeAudio === ch.url;
-          const isFocus = layout === 'focus' && canFocus && ch.url === focusUrl;
-          return (
-            <div
-              key={ch.url}
-              tabIndex={0}
-              role="button"
-              aria-label={ch.name}
-              onClick={() => setActiveAudio(ch.url)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveAudio(ch.url); } }}
-              className={clsx(
-                'group relative cursor-pointer overflow-hidden rounded-lg border bg-black focus:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                isFocus && 'col-span-2 row-span-2',
-                isAudio ? 'border-accent/60 ring-1 ring-accent/40' : 'border-white/[0.06]'
-              )}
-            >
-              <HlsVideo channel={ch} muted={!isAudio} controls={false} lowRes startDelayMs={idx * 300} />
+      {multi.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center px-6">
+          <EmptyState
+            icon={<LayoutGrid size={40} />}
+            title={t('multi.emptyBody')}
+            body={t('shell.multiEmptyHow')}
+            action={{ label: t('multi.browse'), onClick: closeMulti, variant: 'primary' }}
+          />
+        </div>
+      ) : !ready ? (
+        <div className="flex flex-1 items-center justify-center">
+          <Spinner />
+        </div>
+      ) : (
+        <div className={clsx('grid min-h-0 flex-1 gap-2 p-2', focusLayout ? 'auto-rows-fr grid-cols-3' : gridClass(multi.length, width))}>
+          {multi.map((ch, idx) => {
+            const isAudio = activeAudio === ch.url;
+            const isFocus = focusLayout && ch.url === focusUrl;
+            return (
+              <div
+                key={ch.url}
+                data-key={ch.url}
+                tabIndex={0}
+                role="button"
+                aria-pressed={isAudio}
+                aria-label={t('shell.tileLabel', { name: ch.name })}
+                data-autofocus={(activeAudio ? isAudio : idx === 0) ? '' : undefined}
+                onClick={() => setActiveAudio(ch.url)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setActiveAudio(ch.url);
+                  } else if (e.key === 'Delete') {
+                    e.preventDefault();
+                    remove(ch.url, ch.name);
+                  }
+                }}
+                className={clsx(
+                  'group relative min-h-0 cursor-pointer overflow-hidden rounded-card bg-black',
+                  isFocus && 'col-span-2 row-span-2',
+                  isAudio ? 'shadow-[inset_0_0_0_2px_var(--t1)]' : 'shadow-[inset_0_0_0_1px_var(--line)]'
+                )}
+              >
+                <HlsVideo channel={ch} muted={!isAudio} controls={false} lowRes startDelayMs={idx * 300} />
 
-              {/* Tile overlay -- hidden by default (clean video), revealed on hover/focus
-                  so the name + controls never block the picture, esp. on a TV remote. */}
-              <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 bg-gradient-to-b from-black/70 to-transparent px-2 py-1.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                <span className="truncate text-[11px] font-medium text-white">{ch.flag} {ch.name}</span>
-                <div className="pointer-events-auto ml-auto flex items-center gap-1">
+                {/* Name + sound state: always readable, never over the middle of the picture. */}
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 bg-[linear-gradient(180deg,rgba(5,7,10,0),rgba(5,7,10,.86))] px-3 pb-2 pt-6">
+                  <span translate="no" className="text-on-image min-w-0 truncate text-sous font-semibold">
+                    {ch.name}
+                  </span>
+                  {isAudio && (
+                    <span className="pill ml-auto shrink-0">
+                      <Volume2 size={14} aria-hidden="true" />
+                      {t('shell.soundOn')}
+                    </span>
+                  )}
+                </div>
+
+                {/* Tile actions: revealed on hover / focus (the remote reaches them with the D-pad). */}
+                <div
+                  className={clsx(
+                    'absolute right-2 top-2 flex items-center gap-1.5 transition-opacity duration-d1',
+                    tv ? 'opacity-0 group-focus-within:opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+                  )}
+                >
+                  {!isAudio && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveAudio(ch.url);
+                      }}
+                      className="btn btn-secondary btn-icon"
+                      aria-label={t('multi.audio')}
+                      title={t('multi.audio')}
+                    >
+                      <VolumeX size={16} aria-hidden="true" />
+                    </button>
+                  )}
                   <button
-                    onClick={(e) => { e.stopPropagation(); setActiveAudio(ch.url); }}
-                    className={clsx(
-                      'flex h-6 w-6 items-center justify-center rounded bg-black/60 backdrop-blur transition-colors',
-                      isAudio ? 'text-accent' : 'text-white/60 hover:text-white'
-                    )}
-                    aria-label={t('multi.audio')}
-                  >
-                    {isAudio ? <Volume2 size={13} /> : <VolumeX size={13} />}
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); removeFromMulti(ch.url); }}
-                    className="flex h-6 w-6 items-center justify-center rounded bg-black/60 text-white/60 backdrop-blur hover:text-rose-400"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      remove(ch.url, ch.name);
+                    }}
+                    className="btn btn-secondary btn-icon"
                     aria-label={t('multi.remove')}
+                    title={t('multi.remove')}
                   >
-                    <X size={13} />
+                    <X size={16} aria-hidden="true" />
                   </button>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # NEOWATCH EPG grab: pull several EU TV-guide sites, merge, gzip, host.
-# Safe: writes to a temp file and only swaps the live guide on success.
+# Safe: writes to temp files and only swaps the live guide (atomic rename) on success.
+# Repo copy: scripts/epg/ (scripts/deploy.sh ships it to /root/epg).
 set -u
 cd /root/epg/epg || exit 1
 
@@ -43,7 +44,17 @@ if node /root/epg/merge.mjs "$PARTS" "$TMPOUT"; then
   # Italian site alone can dwarf the FR channels we actually care about).
   if [ "$CHANS" -ge 30 ] && [ "$PROGS" -gt 1000 ]; then
     mv -f "$TMPOUT" "$OUT"
-    gzip -f -c "$OUT" > "$HOSTED"
+    # Atomic swap of the hosted guide: gzip next to it, then rename (same filesystem), so
+    # nginx and the server's 6h refresh never read a half-written file.
+    HOSTED_TMP="$(dirname "$HOSTED")/.$(basename "$HOSTED").$$"
+    if gzip -c "$OUT" > "$HOSTED_TMP"; then
+      mv -f "$HOSTED_TMP" "$HOSTED"
+    else
+      rm -f "$HOSTED_TMP"
+      echo "[$(date -u +%FT%TZ)] ABORT: gzip failed, keeping the hosted guide"
+      rm -rf "$PARTS"
+      exit 1
+    fi
     echo "[$(date -u +%FT%TZ)] hosted $CHANS channels / $PROGS programmes -> $HOSTED"
   else
     echo "[$(date -u +%FT%TZ)] ABORT: only $CHANS channels / $PROGS programmes, keeping previous guide"

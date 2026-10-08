@@ -1,52 +1,75 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type Hls from 'hls.js';
 import { clsx } from 'clsx';
 import {
-  X, Heart, Plus, Check, Maximize2, PictureInPicture2, ShieldCheck, Gauge, Subtitles,
-  Volume2, Volume1, VolumeX, Play, Pause,
+  X, Heart, Plus, Check, Maximize2, PictureInPicture2, Route, Gauge, Subtitles,
+  Volume2, Volume1, VolumeX, Play, Pause, SkipBack, SkipForward,
 } from 'lucide-react';
 import type { Channel } from '@/types';
 import { HlsVideo, type PlaybackStatus } from './HlsVideo';
-import { HealthBadge } from './ui';
+import { HealthPill, LivePill, Pill, Spinner } from './ui';
+import { countryLabel } from './ChannelCard';
 import { categoryLabel } from '@/lib/format';
-import { fetchNowNext, fmtTime, type NowNext } from '@/lib/epg';
+import { fetchNowNext, type NowNext } from '@/lib/epg';
 import { useCatalog } from '@/store/catalogStore';
-import { usePlayer } from '@/store/playerStore';
+import { usePlayer, MAX_TILES } from '@/store/playerStore';
 import { useSettings } from '@/store/settingsStore';
-import { useT } from '@/lib/i18n';
+import { toast } from '@/store/uiStore';
+import { useT, fmtTime } from '@/lib/i18n';
+import { isTV } from '@/lib/device';
+import { navigateFromLayers } from '@/lib/spatialNav';
+
+// The player (spec 2.5): a layer over everything (spatialNav pushes a history
+// entry, takes focus, restores it to the launching card on Back). Top: close,
+// LIVE · category · country, the channel name, now / next. Bottom: one row of
+// controls. Zapping: Previous / Next channel in the list it was opened from
+// (buttons, PageUp / PageDown, ChannelUp / ChannelDown).
 
 interface Track { name: string; lang?: string }
 
+const isTyping = (el: Element | null) => !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT');
+const ZAP_NEXT = new Set(['PageDown', 'ChannelDown', 'MediaTrackNext']);
+const ZAP_PREV = new Set(['PageUp', 'ChannelUp', 'MediaTrackPrevious']);
+// Tizen / webOS channel keys (keyCode only on some remotes).
+const ZAP_NEXT_CODES = new Set([428]);
+const ZAP_PREV_CODES = new Set([427]);
+
 export function Player({ channel }: { channel: Channel }) {
   const close = usePlayer((s) => s.close);
+  const ready = usePlayer((s) => s.currentReady);
+  const next = usePlayer((s) => s.next);
+  const prev = usePlayer((s) => s.prev);
+  const canZap = usePlayer((s) => s.queue.length > 1);
   const addToMulti = usePlayer((s) => s.addToMulti);
   const inMulti = usePlayer((s) => s.isInMulti(channel.url));
   const toggleFavorite = useCatalog((s) => s.toggleFavorite);
   const isFavorite = useCatalog((s) => s.isFavorite(channel.url));
-  const health = useCatalog((s) => s.health[channel.url] || 'unknown');
-  const latency = useCatalog((s) => s.latency[channel.url]);
+  const health = useCatalog((s) => s.health[channel.url] || (channel.online === true ? 'online' : channel.online === false ? 'offline' : 'unknown'));
   const { defaultMuted, preferProxy, set: setSettings } = useSettings();
+  const navigate = useNavigate();
+  const t = useT();
 
+  const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [status, setStatus] = useState<PlaybackStatus>('loading');
   const [levels, setLevels] = useState<{ height: number; bitrate: number }[]>([]);
   const [currentLevel, setCurrentLevel] = useState(-1);
-  const [showQuality, setShowQuality] = useState(false);
-  const [muted, setMuted] = useState(defaultMuted);
+  const [menu, setMenu] = useState<'quality' | 'tracks' | null>(null);
+  const startMuted = usePlayer((s) => s.startMuted);
+  const [muted, setMuted] = useState(defaultMuted || startMuted);
   const [volume, setVolume] = useState(1);
   const [paused, setPaused] = useState(false);
   const [epg, setEpg] = useState<NowNext | null>(null);
-  // Audio languages + subtitles, when the stream carries multiple tracks.
   const [audioTracks, setAudioTracks] = useState<Track[]>([]);
   const [audioTrack, setAudioTrack] = useState(-1);
   const [subTracks, setSubTracks] = useState<Track[]>([]);
   const [subTrack, setSubTrack] = useState(-1);
-  const [showTracks, setShowTracks] = useState(false);
-  const t = useT();
   const isYouTube = channel.kind === 'youtube';
+  const tv = isTV();
 
-  // Program guide (now/next) for this channel, if EPG data is loaded.
+  // Now / next for this channel, when the guide has it.
   useEffect(() => {
     setEpg(null);
     if (!channel.channelId) return;
@@ -61,8 +84,7 @@ export function Player({ channel }: { channel: Channel }) {
 
   const getVideo = () => containerRef.current?.querySelector('video') as HTMLVideoElement | null;
 
-  // Sync volume + mute to the <video>, and mirror native play/pause into state
-  // so our quick-action buttons stay correct even if the user uses the native bar.
+  // Volume + mute to the <video>; native play/pause mirrored into our buttons.
   useEffect(() => {
     const v = getVideo();
     if (!v) return;
@@ -92,48 +114,80 @@ export function Player({ channel }: { channel: Channel }) {
 
   const bumpVolume = (delta: number) => {
     setVolume((vol) => {
-      const next = Math.min(1, Math.max(0, +(vol + delta).toFixed(2)));
-      if (next > 0 && muted) setMuted(false);
-      return next;
+      const n = Math.min(1, Math.max(0, +(vol + delta).toFixed(2)));
+      if (n > 0) setMuted(false);
+      return n;
     });
   };
 
+  const toggleFullscreen = () => {
+    const el = rootRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else el.requestFullscreen?.().catch(() => {});
+  };
+
+  // Shortcuts. Capture phase so they win over spatial navigation, but never
+  // while a menu or a field has the focus (its arrows are its own) and never
+  // on TV for the arrows (the D-pad moves between the controls there).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
-      if (e.key === 'Escape') close();
-      else if (k === 'f') toggleFullscreen();
-      else if (k === 'm') setMuted((m) => !m);
-      else if (e.key === ' ' && !isYouTube) {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      const active = document.activeElement;
+      if (isTyping(active)) return;
+      const inMenu = !!active?.closest('[role="menu"]');
+      const k = e.key;
+      if (ZAP_NEXT.has(k) || ZAP_NEXT_CODES.has(e.keyCode)) {
+        e.preventDefault();
+        next();
+        return;
+      }
+      if (ZAP_PREV.has(k) || ZAP_PREV_CODES.has(e.keyCode)) {
+        e.preventDefault();
+        prev();
+        return;
+      }
+      if (k === 'Escape' && menu) {
+        e.preventDefault(); // close the menu first, the player on the next Back
+        setMenu(null);
+        return;
+      }
+      if (inMenu) return;
+      const lower = k.toLowerCase();
+      if (lower === 'f') toggleFullscreen();
+      else if (lower === 'm') setMuted((m) => !m);
+      else if ((k === ' ' || k === 'MediaPlayPause') && !isYouTube) {
+        // Space on a focused button presses that button, except from the Android shell
+        // (dispatched on document) and when nothing in particular has the focus.
+        const onControl = !!active && active !== document.body && active.tagName === 'BUTTON' && e.target !== document;
+        if (onControl && k === ' ') return;
         e.preventDefault();
         togglePlay();
-      } else if (e.key === 'ArrowUp' && !isYouTube) {
+      } else if (!tv && !isYouTube && (k === 'ArrowUp' || k === 'ArrowDown')) {
+        const free = !active || active === document.body || active === containerRef.current || active.tagName === 'VIDEO';
+        if (!free) return;
         e.preventDefault();
-        bumpVolume(0.1);
-      } else if (e.key === 'ArrowDown' && !isYouTube) {
-        e.preventDefault();
-        bumpVolume(-0.1);
+        bumpVolume(k === 'ArrowUp' ? 0.1 : -0.1);
       }
     };
-    // Capture phase so the player's volume/seek/escape keys win over the global
-    // spatial-navigation handler (which then only sees the keys we don't handle).
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [close, isYouTube, muted]);
+  }, [isYouTube, menu, next, prev, tv]);
 
   const onHls = (hls: Hls | null) => {
     hlsRef.current = hls;
-    // Reset stale level/track state whenever the instance is torn down or replaced.
+    // Reset stale level / track state whenever the instance is torn down or replaced.
     setLevels([]); setCurrentLevel(-1);
     setAudioTracks([]); setAudioTrack(-1); setSubTracks([]); setSubTrack(-1);
     if (!hls) return;
     const syncTracks = () => {
-      setAudioTracks((hls.audioTracks || []).map((a: any) => ({ name: a.name, lang: a.lang })));
+      setAudioTracks((hls.audioTracks || []).map((a) => ({ name: a.name, lang: a.lang })));
       setAudioTrack(hls.audioTrack);
-      setSubTracks((hls.subtitleTracks || []).map((s: any) => ({ name: s.name, lang: s.lang })));
+      setSubTracks((hls.subtitleTracks || []).map((s) => ({ name: s.name, lang: s.lang })));
       setSubTrack(hls.subtitleTrack);
     };
+    /* eslint-disable @typescript-eslint/no-explicit-any */
     hls.on('hlsManifestParsed' as any, () => {
       setLevels(hls.levels.map((l) => ({ height: l.height, bitrate: l.bitrate })));
       syncTracks();
@@ -143,89 +197,135 @@ export function Player({ channel }: { channel: Channel }) {
     hls.on('hlsSubtitleTracksUpdated' as any, syncTracks);
     hls.on('hlsAudioTrackSwitched' as any, (_e: unknown, d: { id: number }) => setAudioTrack(d.id));
     hls.on('hlsSubtitleTrackSwitch' as any, (_e: unknown, d: { id: number }) => setSubTrack(d.id));
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   };
 
-  const pickAudio = (id: number) => { if (hlsRef.current) hlsRef.current.audioTrack = id; setAudioTrack(id); };
-  const pickSub = (id: number) => { if (hlsRef.current) hlsRef.current.subtitleTrack = id; setSubTrack(id); };
+  const pickAudio = (id: number) => { if (hlsRef.current) hlsRef.current.audioTrack = id; setAudioTrack(id); setMenu(null); };
+  const pickSub = (id: number) => { if (hlsRef.current) hlsRef.current.subtitleTrack = id; setSubTrack(id); setMenu(null); };
+  const pickLevel = (idx: number) => { if (hlsRef.current) hlsRef.current.currentLevel = idx; setCurrentLevel(idx); setMenu(null); };
   const hasTracks = audioTracks.length > 1 || subTracks.length > 0;
 
-  const toggleFullscreen = () => {
-    const el = containerRef.current;
-    if (!el) return;
-    if (document.fullscreenElement) document.exitFullscreen();
-    else el.requestFullscreen?.().catch(() => {});
-  };
-
   const enterPip = async () => {
-    const video = containerRef.current?.querySelector('video');
+    const video = getVideo();
     if (video && document.pictureInPictureEnabled) {
-      try {
-        await (video as HTMLVideoElement).requestPictureInPicture();
-      } catch {
-        /* ignored */
-      }
+      try { await video.requestPictureInPicture(); } catch { /* refused */ }
     }
   };
 
-  const pickLevel = (idx: number) => {
-    if (hlsRef.current) hlsRef.current.currentLevel = idx;
-    setCurrentLevel(idx);
-    setShowQuality(false);
+  const onFavorite = () => {
+    const was = isFavorite;
+    toggleFavorite(channel);
+    toast(t(was ? 'toast.removedList' : 'toast.addedList'), { ok: !was, undo: () => toggleFavorite(channel) });
+  };
+  const onMulti = () => {
+    const n = usePlayer.getState().multi.length + (inMulti ? 0 : 1);
+    addToMulti(channel);
+    if (!inMulti) toast(t('toast.addedMulti', { n: Math.min(n, MAX_TILES), max: MAX_TILES }), { ok: true });
+  };
+  const openChannelPage = () => {
+    navigateFromLayers(navigate, `/chaine/${encodeURIComponent(channel.canonicalId || channel.id)}`);
+    close();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black/95 backdrop-blur-sm animate-fade-in">
-      {/* Header */}
-      <div className="glass flex items-center gap-3 border-b border-white/[0.06] px-4 py-2.5">
-        <span className="text-xl">{channel.flag || '🌐'}</span>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h2 className="truncate text-base font-bold text-ink">{channel.name}</h2>
-            <HealthBadge status={health} latency={latency} />
-          </div>
-          <p className="truncate text-[11px] text-ink/40">
-            {[channel.countryName, channel.categories.map(categoryLabel).slice(0, 2).join(' · ')]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-        </div>
-        <button onClick={close} className="ml-auto rounded-lg p-2 text-ink/60 hover:bg-white/5 hover:text-ink" aria-label="Fermer">
-          <X size={18} />
-        </button>
-      </div>
+  const country = countryLabel(channel, t.lang);
+  const category = channel.categories[0] ? categoryLabel(channel.categories[0]) : null;
+  const pipOk = typeof document !== 'undefined' && !!document.pictureInPictureEnabled && !isYouTube;
 
-      {/* Program guide (now / next) */}
-      {epg?.now && (
-        <div className="flex items-center gap-3 border-b border-white/[0.06] bg-black/40 px-4 py-1.5 text-[11px]">
-          <span className="flex items-center gap-1.5 font-mono text-emerald-400">
-            <span className="h-1.5 w-1.5 animate-pulse-live rounded-full bg-emerald-400" /> {t('player.onNow')}
-          </span>
-          <span className="truncate text-ink/80">{epg.now.title}</span>
-          {epg.now.stop && <span className="shrink-0 text-ink/40">→ {fmtTime(epg.now.stop)}</span>}
-          {epg.next && (
-            <span className="ml-auto hidden shrink-0 truncate text-ink/40 sm:block">
-              {t('player.nextUp')} : {epg.next.title} ({fmtTime(epg.next.start)})
-            </span>
+  return (
+    <div
+      ref={rootRef}
+      data-layer="player"
+      role="dialog"
+      aria-modal="true"
+      aria-label={channel.name}
+      className="fixed inset-0 z-50 flex flex-col bg-[var(--e-fond)] animate-fade-in"
+    >
+      {/* Top: close, overline, name, now / next */}
+      <div className="flex items-start gap-3 border-b border-line bg-[var(--bg-1)] px-[var(--gouttiere)] py-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* What the screen shows, not the last check: no LIVE over the error overlay. */}
+            {status === 'playing' ? <LivePill /> : status === 'error' ? <Pill tone="alert">{t('pill.unavailable')}</Pill> : <HealthPill status={health} />}
+            {(category || country) && (
+              <p className="overline truncate">
+                {category}
+                {category && country && ' · '}
+                {country && <span translate="no">{country}</span>}
+              </p>
+            )}
+          </div>
+          <h2 translate="no" className="mt-1 truncate text-titre2 font-semibold text-ink">
+            {channel.name}
+          </h2>
+          {epg?.now && (
+            <p className="mt-0.5 truncate text-sous text-ink-2">
+              {epg.now.stop ? t('player.untilTime', { title: epg.now.title, time: fmtTime(epg.now.stop) }) : <span translate="no">{epg.now.title}</span>}
+            </p>
+          )}
+          {epg?.next && (
+            <p className="meta mt-0.5 hidden truncate sm:block">
+              {t('player.nextTime', { time: fmtTime(epg.next.start), title: epg.next.title })}
+            </p>
           )}
         </div>
-      )}
-
-      {/* Video */}
-      <div ref={containerRef} className="relative flex-1 bg-black">
-        <HlsVideo channel={channel} muted={muted} controls onStatus={setStatus} onHls={onHls} />
+        <div className="flex shrink-0 items-center gap-2">
+          {channel.id && (
+            <button type="button" onClick={openChannelPage} className="btn btn-secondary hidden sm:inline-flex">
+              {t('player.channelPage')}
+            </button>
+          )}
+          <button type="button" onClick={close} aria-label={t('player.close')} title={t('player.close')} className="btn btn-secondary btn-icon">
+            <X size={20} aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
-      {/* Control bar */}
-      <div className="glass flex flex-wrap items-center gap-2 border-t border-white/[0.06] px-3 py-2.5 sm:px-4">
+      {/* Video */}
+      <div ref={containerRef} tabIndex={-1} className="relative min-h-0 flex-1 bg-black outline-none">
+        {ready ? (
+          <HlsVideo
+            channel={channel}
+            muted={muted}
+            // Native controls once the picture runs: while loading, the browser's own
+            // spinner would sit on top of ours.
+            controls={!tv && status === 'playing'}
+            onStatus={setStatus}
+            onHls={onHls}
+            onNext={canZap ? next : undefined}
+            // A forced mute (autoplay refused with sound) must stick: the effect
+            // above writes `muted` back to the <video> on every status change.
+            onMutedChange={setMuted}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <Spinner />
+          </div>
+        )}
+      </div>
+
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-line bg-[var(--bg-1)] px-[var(--gouttiere)] py-2.5">
+        {canZap && (
+          <Ctrl onClick={prev} label={t('shell.prevChannel')}>
+            <SkipBack size={18} />
+          </Ctrl>
+        )}
         {!isYouTube && (
-          <>
-            <CtrlBtn onClick={togglePlay} title={paused ? t('player.play') : t('player.pause')}>
-              {paused ? <Play size={16} /> : <Pause size={16} />}
-            </CtrlBtn>
-            <div className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2">
-              <button onClick={() => setMuted((m) => !m)} title={t('player.mute')} aria-label={t('player.mute')} className="text-ink/70 hover:text-accent">
-                {muted || volume === 0 ? <VolumeX size={16} /> : volume < 0.5 ? <Volume1 size={16} /> : <Volume2 size={16} />}
-              </button>
+          <Ctrl onClick={togglePlay} label={paused ? t('player.play') : t('player.pause')} autoFocus>
+            {paused ? <Play size={18} /> : <Pause size={18} />}
+          </Ctrl>
+        )}
+        {canZap && (
+          <Ctrl onClick={next} label={t('player.nextChannel')}>
+            <SkipForward size={18} />
+          </Ctrl>
+        )}
+        {!isYouTube && (
+          <div className="flex items-center gap-2">
+            <Ctrl onClick={() => setMuted((m) => !m)} label={t('player.mute')} pressed={muted}>
+              {muted || volume === 0 ? <VolumeX size={18} /> : volume < 0.5 ? <Volume1 size={18} /> : <Volume2 size={18} />}
+            </Ctrl>
+            {!tv && (
               <input
                 type="range"
                 min={0}
@@ -237,118 +337,154 @@ export function Player({ channel }: { channel: Channel }) {
                   setVolume(v);
                   setMuted(v === 0);
                 }}
-                className="h-1 w-16 cursor-pointer accent-[rgb(var(--accent))] sm:w-24"
+                style={{ accentColor: 'var(--t1)' }}
+                className="hidden h-1 w-24 cursor-pointer sm:block"
                 aria-label={t('player.volume')}
+                title={t('player.volume')}
               />
-            </div>
-            <span className="hidden w-8 font-mono text-[10px] tabular-nums text-ink/40 sm:inline">{Math.round((muted ? 0 : volume) * 100)}%</span>
-          </>
-        )}
-        <CtrlBtn active={isFavorite} onClick={() => toggleFavorite(channel)} title={t('common.favorite')}>
-          <Heart size={16} fill={isFavorite ? 'currentColor' : 'none'} />
-        </CtrlBtn>
-        <CtrlBtn active={inMulti} onClick={() => addToMulti(channel)} title={t('common.addMulti')}>
-          {inMulti ? <Check size={16} /> : <Plus size={16} />}
-        </CtrlBtn>
-        <CtrlBtn active={preferProxy} onClick={() => setSettings({ preferProxy: !preferProxy })} title={t('player.proxyTitle')}>
-          <ShieldCheck size={16} />
-        </CtrlBtn>
-
-        <div className="relative">
-          <CtrlBtn active={showQuality} onClick={() => setShowQuality((v) => !v)} title={t('player.quality')} disabled={!levels.length}>
-            <Gauge size={16} />
-          </CtrlBtn>
-          {showQuality && levels.length > 0 && (
-            <div className="absolute bottom-11 left-0 max-h-64 w-24 overflow-y-auto rounded-lg border border-white/10 bg-panel shadow-xl sm:w-32">
-              <button
-                onClick={() => pickLevel(-1)}
-                className={clsx('block w-full px-3 py-1.5 text-left text-[11px] hover:bg-white/5', currentLevel === -1 && 'text-accent')}
-              >
-                Auto (ABR)
-              </button>
-              {levels.map((l, i) => (
-                <button
-                  key={i}
-                  onClick={() => pickLevel(i)}
-                  className={clsx('block w-full px-3 py-1.5 text-left text-[11px] hover:bg-white/5', currentLevel === i && 'text-accent')}
-                >
-                  {l.height ? `${l.height}p` : `${Math.round(l.bitrate / 1000)}k`}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Audio language + subtitles -- shown only when the stream carries tracks */}
-        {hasTracks && (
-          <div className="relative">
-            <CtrlBtn active={showTracks} onClick={() => setShowTracks((v) => !v)} title={`${t('player.audioTrack')} / ${t('player.subtitles')}`}>
-              <Subtitles size={16} />
-            </CtrlBtn>
-            {showTracks && (
-              <div className="absolute bottom-11 left-0 max-h-72 w-44 overflow-y-auto rounded-lg border border-white/10 bg-panel py-1 shadow-xl">
-                {audioTracks.length > 1 && (
-                  <>
-                    <div className="px-3 py-1 font-mono text-[9px] uppercase tracking-widest text-ink/40">{t('player.audioTrack')}</div>
-                    {audioTracks.map((a, i) => (
-                      <button key={`a${i}`} onClick={() => pickAudio(i)} className={clsx('block w-full truncate px-3 py-1.5 text-left text-[11px] hover:bg-white/5', audioTrack === i && 'text-accent')}>
-                        {(a.lang || a.name || `Audio ${i + 1}`)}{a.lang && a.name ? ` · ${a.name}` : ''}
-                      </button>
-                    ))}
-                  </>
-                )}
-                <div className="px-3 py-1 font-mono text-[9px] uppercase tracking-widest text-ink/40">{t('player.subtitles')}</div>
-                <button onClick={() => pickSub(-1)} className={clsx('block w-full px-3 py-1.5 text-left text-[11px] hover:bg-white/5', subTrack === -1 && 'text-accent')}>{t('player.off')}</button>
-                {subTracks.map((s, i) => (
-                  <button key={`s${i}`} onClick={() => pickSub(i)} className={clsx('block w-full truncate px-3 py-1.5 text-left text-[11px] hover:bg-white/5', subTrack === i && 'text-accent')}>
-                    {(s.lang || s.name || `ST ${i + 1}`)}{s.lang && s.name ? ` · ${s.name}` : ''}
-                  </button>
-                ))}
-              </div>
             )}
           </div>
         )}
 
+        <Ctrl onClick={onFavorite} label={isFavorite ? t('home.inMyList') : t('home.myList')} pressed={isFavorite}>
+          <Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} />
+        </Ctrl>
+        <Ctrl onClick={onMulti} label={inMulti ? t('shell.inMulti') : t('common.addMulti')} pressed={inMulti}>
+          {inMulti ? <Check size={18} /> : <Plus size={18} />}
+        </Ctrl>
+
         <div className="ml-auto flex items-center gap-2">
-          <span className="font-mono text-[10px] text-ink/40">{status === 'playing' ? t('player.live') : status === 'loading' ? t('player.loading') : t('player.error')}</span>
-          <CtrlBtn onClick={enterPip} title={t('player.pip')}>
-            <PictureInPicture2 size={16} />
-          </CtrlBtn>
-          <CtrlBtn onClick={toggleFullscreen} title={t('player.fullscreen')}>
-            <Maximize2 size={16} />
-          </CtrlBtn>
+          <Ctrl onClick={() => setSettings({ preferProxy: !preferProxy })} label={t('player.proxyTitle')} pressed={preferProxy}>
+            <Route size={18} />
+          </Ctrl>
+          {levels.length > 1 && (
+            <div className="relative">
+              <Ctrl onClick={() => setMenu((m) => (m === 'quality' ? null : 'quality'))} label={t('player.quality')} pressed={menu === 'quality'} hasMenu>
+                <Gauge size={18} />
+              </Ctrl>
+              {menu === 'quality' && (
+                <Menu label={t('player.quality')}>
+                  <MenuItem checked={currentLevel === -1} onSelect={() => pickLevel(-1)} autoFocus>
+                    {t('shell.qualityAuto')}
+                  </MenuItem>
+                  {levels.map((l, i) => (
+                    <MenuItem key={i} checked={currentLevel === i} onSelect={() => pickLevel(i)}>
+                      {l.height ? <span translate="no">{`${l.height}p`}</span> : t('shell.qualityLevel', { n: i + 1 })}
+                    </MenuItem>
+                  ))}
+                </Menu>
+              )}
+            </div>
+          )}
+          {hasTracks && (
+            <div className="relative">
+              <Ctrl onClick={() => setMenu((m) => (m === 'tracks' ? null : 'tracks'))} label={t('shell.audioSubs')} pressed={menu === 'tracks'} hasMenu>
+                <Subtitles size={18} />
+              </Ctrl>
+              {menu === 'tracks' && (
+                <Menu label={t('shell.audioSubs')}>
+                  {audioTracks.length > 1 && (
+                    <>
+                      <p className="overline px-3 pb-1 pt-2">{t('player.audioTrack')}</p>
+                      {audioTracks.map((a, i) => (
+                        <MenuItem key={`a${i}`} checked={audioTrack === i} onSelect={() => pickAudio(i)} autoFocus={i === 0}>
+                          <span translate="no">{trackName(a, t('shell.trackN', { n: i + 1 }))}</span>
+                        </MenuItem>
+                      ))}
+                    </>
+                  )}
+                  <p className="overline px-3 pb-1 pt-2">{t('player.subtitles')}</p>
+                  <MenuItem checked={subTrack === -1} onSelect={() => pickSub(-1)} autoFocus={audioTracks.length <= 1}>
+                    {t('player.off')}
+                  </MenuItem>
+                  {subTracks.map((s, i) => (
+                    <MenuItem key={`s${i}`} checked={subTrack === i} onSelect={() => pickSub(i)}>
+                      <span translate="no">{trackName(s, t('shell.trackN', { n: i + 1 }))}</span>
+                    </MenuItem>
+                  ))}
+                </Menu>
+              )}
+            </div>
+          )}
+          {pipOk && (
+            <Ctrl onClick={enterPip} label={t('player.pip')}>
+              <PictureInPicture2 size={18} />
+            </Ctrl>
+          )}
+          {!tv && (
+            <Ctrl onClick={toggleFullscreen} label={t('player.fullscreen')}>
+              <Maximize2 size={18} />
+            </Ctrl>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function CtrlBtn({
-  children,
-  onClick,
-  active,
-  title,
-  disabled,
-}: {
-  children: React.ReactNode;
+function trackName(tr: Track, fallback: string) {
+  if (tr.lang && tr.name && tr.name.toLowerCase() !== tr.lang.toLowerCase()) return `${tr.lang} · ${tr.name}`;
+  return tr.name || tr.lang || fallback;
+}
+
+function Ctrl({ children, onClick, label, pressed, autoFocus, hasMenu }: {
+  children: ReactNode;
   onClick: () => void;
-  active?: boolean;
-  title: string;
-  disabled?: boolean;
+  label: string;
+  pressed?: boolean;
+  autoFocus?: boolean;
+  hasMenu?: boolean;
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      title={title}
-      aria-label={title}
-      disabled={disabled}
-      className={clsx(
-        'flex h-9 w-9 items-center justify-center rounded-lg border transition-colors',
-        disabled && 'cursor-not-allowed opacity-30',
-        active ? 'border-accent/40 bg-accent/15 text-accent' : 'border-white/10 bg-white/[0.03] text-ink/70 hover:border-accent/30 hover:text-accent'
-      )}
+      title={label}
+      aria-label={label}
+      aria-pressed={hasMenu ? undefined : pressed}
+      aria-haspopup={hasMenu ? 'menu' : undefined}
+      aria-expanded={hasMenu ? !!pressed : undefined}
+      data-autofocus={autoFocus ? '' : undefined}
+      className={clsx('btn btn-icon', pressed ? 'btn-secondary border-[var(--t2)] text-ink' : 'btn-secondary text-ink-2 hover:text-ink')}
+    >
+      <span aria-hidden="true" className="contents">
+        {children}
+      </span>
+    </button>
+  );
+}
+
+function Menu({ label, children }: { label: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Focus the checked (or first) item when the menu opens: the D-pad starts inside it.
+  useEffect(() => {
+    const el = ref.current?.querySelector<HTMLElement>('[aria-checked="true"]') || ref.current?.querySelector<HTMLElement>('[role="menuitemradio"]');
+    el?.focus({ preventScroll: true });
+  }, []);
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      aria-label={label}
+      className="absolute bottom-[calc(100%+8px)] right-0 z-10 max-h-72 min-w-[180px] overflow-y-auto rounded-card border border-line-strong bg-[var(--surface-menu)] p-1.5 shadow-menu"
     >
       {children}
+    </div>
+  );
+}
+
+function MenuItem({ children, checked, onSelect, autoFocus }: { children: ReactNode; checked: boolean; onSelect: () => void; autoFocus?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={checked}
+      data-autofocus={autoFocus ? '' : undefined}
+      onClick={onSelect}
+      className="flex min-h-[var(--cible-souris)] w-full items-center gap-3 rounded-field px-3 text-left text-sous text-ink hover:bg-[var(--bg-3)] focus-visible:bg-[var(--bg-3)]"
+    >
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {checked && <Check size={16} aria-hidden="true" className="text-ink-2" />}
     </button>
   );
 }

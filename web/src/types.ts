@@ -27,6 +27,8 @@ export interface Channel {
   alternates?: { url: string; proxyUrl: string | null; userAgent?: string | null; referrer?: string | null }[];
   online?: boolean | null;  // server-known reachability (sweep / on-demand)
   latency?: number | null;
+  checkedAt?: number | null; // when `online` was last verified (ms); null = never
+  canonicalId?: string;      // current id when an old id was resolved via alias / ?channelId=
 }
 
 export interface Facet {
@@ -74,13 +76,16 @@ export interface User {
   plan: 'free' | 'premium';
   planExpires: number | null;
   premium: boolean;
+  planSource?: 'mock' | 'stripe' | 'admin' | null;
+  cancelAtPeriodEnd?: boolean;
   createdAt: string;
   favorites: string[];
   multi?: Channel[]; // multi-screen mosaic config, roams across devices
 }
 
 export interface BillingConfig {
-  provider: 'mock' | 'stripe';
+  provider: 'mock' | 'stripe' | string;
+  checkout?: boolean; // false = buying is closed (show "Coming soon")
   price: number;
   currency: string;
   period: number;
@@ -117,7 +122,7 @@ export interface HomeRail {
 }
 export interface HomeData {
   rails: HomeRail[];
-  featured: (Channel & { railKey: string; railTitle: string; railIcon: string })[];
+  featured: (Channel & { railKey: string; railTitle: string; railIcon: string; heroCategory?: string | null })[];
 }
 
 export interface Filters {

@@ -1,18 +1,4 @@
-import type { Channel } from '@/types';
 import { currentLang, hasKey, translate } from './i18n';
-
-// The proxy URL is SIGNED server-side (HMAC + TTL) and delivered as ch.proxyUrl
-// for every channel the user is allowed to play. The client never builds or
-// signs it -- this is what keeps the proxy from being an open relay and keeps
-// any credential out of the query string.
-export function proxiedUrl(ch: Channel): string | null {
-  return ch.proxyUrl || null;
-}
-
-// A stream needs the proxy if it carries custom UA/referrer (browser-forbidden headers).
-export function mustProxy(ch: Channel): boolean {
-  return !!(ch.userAgent || ch.referrer);
-}
 
 export function getYouTubeId(url: string): string | null {
   try {
@@ -52,12 +38,6 @@ export function categoryIcon(id: string): string {
 
 // Locale-aware formatting lives in lib/i18n.ts; re-exported for convenience.
 export { fmtNum, fmtTime, fmtDate, fmtAge } from './i18n';
-
-export function qualityRank(q: string | null): number {
-  if (!q) return 0;
-  const m = q.match(/(\d{3,4})/);
-  return m ? Number(m[1]) : 0;
-}
 
 export function debounce<F extends (...a: any[]) => void>(fn: F, ms: number) {
   let t: ReturnType<typeof setTimeout> | undefined;

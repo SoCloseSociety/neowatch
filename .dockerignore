@@ -1,9 +1,30 @@
+# Build context = what `COPY` may see. Keep it small and free of secrets.
 node_modules
 **/node_modules
 web/dist
 server/.cache
 server/.data
+.data
+.cache
 .git
+.github
 *.log
 .DS_Store
 .env
+.env.*
+# Android shell + signing material: never in an image (or a remote build cache)
+android/
+NEOWATCH - Google Play package/
+NEOWATCH - Google Play package.zip
+*.keystore
+*.jks
+keystore.properties
+signing-key-info.txt
+*.apk
+*.aab
+twa-manifest.json
+# Not needed at runtime
+test/
+docs/
+tasks/
+scripts/

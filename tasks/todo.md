@@ -39,13 +39,13 @@ Audit: 8 dimensions x (auditor + adversarial verifier) = 177 findings, 176 confi
 #### Review (S1-S3, 08/10)
 Three implementers on disjoint files + one adversarial reviewer. integration 66/66, session 83/83, s1 70/70, s2 live 45/45 + fake 56/56 (+ stale 26/26, empty 4/4 by the implementer), s3 dev 83/83 + prod 60/60 + stripe 78/78, typecheck + build green, frozen contract checked route by route (additive only: `canonicalId`, `checkedAt`, `heroCategory`, `?channelId=`). Real playback through the proxy 3/3 before and after.
 Behaviour changes to know: mock checkout closes in production unless `ALLOW_MOCK_BILLING=true` (owner's call); `/api/health` returns 503 when the catalog is empty or older than 2x TTL (user counts admin-only); a taken-down stream answers 410 at the proxy; health verdicts older than 12h count as unknown; proxied URLs carry `Cross-Origin-Resource-Policy: same-origin`.
-Open for OPS: `.env.example` (drop ACCESS_PASSWORD, add ALLOW_MOCK_BILLING, ALLOW_PRIVATE_SOURCES scope), DEPLOY.md Stripe events + 410, `tasks/epg/grab.sh` atomic write, nginx document headers (X-Frame-Options DENY, CSP frame-ancestors, nosniff, HSTS) -- prod nginx edit needs the owner's explicit OK.
+Open for OPS: `.env.example` (drop ACCESS_PASSWORD, add ALLOW_MOCK_BILLING, ALLOW_PRIVATE_SOURCES scope), DEPLOY.md Stripe events + 410, `scripts/epg/grab.sh` atomic write, nginx document headers (X-Frame-Options DENY, CSP frame-ancestors, nosniff, HSTS) -- prod nginx edit needs the owner's explicit OK.
 
 ### Lot W0 -- design foundation (alone, first)
 - [x] Tokens Lunaire in index.css + tailwind mapping, IBM Plex Sans/Mono, focus ring (bone white + halo + scale), ui primitives (button primary/secondary/discreet, pill, empty state with action, toast), 12px floor, reduced motion, one primary action rule. Exact spec: see Design spec section below.
 
 #### Review (Lot 0, 08/10)
-typecheck + build green; tokens 51/51 Lunaire + 24/24 Doux equal to Sentinel charte.css (`node tasks/verify-design.mjs --tokens`); 0 off-origin font/script requests (66 before); focus faults 139 -> 2; contrast faults 418 -> 84; sub-12px nodes 8334 -> 4751 (rest is page-level, lots A-D); legacy settings migrate to Lunaire. i18n fragments `web/src/lib/i18n/{home,shell,pages,logic}.ts`, primitives in `ui.tsx`, `lib/device.ts` (isTV).
+typecheck + build green; tokens 51/51 Lunaire + 24/24 Doux equal to Sentinel charte.css (`node test/verify-design.mjs --tokens`); 0 off-origin font/script requests (66 before); focus faults 139 -> 2; contrast faults 418 -> 84; sub-12px nodes 8334 -> 4751 (rest is page-level, lots A-D); legacy settings migrate to Lunaire. i18n fragments `web/src/lib/i18n/{home,shell,pages,logic}.ts`, primitives in `ui.tsx`, `lib/device.ts` (isTV).
 
 ### Lots A-D -- pages + web logic (parallel, disjoint files): see design spec sections 5 + 7
 ### Lot W-logic -- web correctness
@@ -59,21 +59,29 @@ typecheck + build green; tokens 51/51 Lunaire + 24/24 Doux equal to Sentinel cha
 - [ ] `android/` WebView shell project in the repo (same package `co.soclose.neowatch.twa`, same signing key from `~/Documents/VsCodeN30/neowatch-signing`, never committed), Leanback launcher + banner, D-pad, autoplay allowed, Back = history back. Build locally; DO NOT publish to /app.apk until the owner says so and Sentinel updates `androidtv.py` (NAVIGATEURS_DE_TWA).
 
 ### Lot OPS -- last
-- [ ] Deps: compression ^1.8.2, express ^4.22.3, proxy-addr 2.0.8, undici ^6.29 (stay on 6: VPS Node 20), react-router 6.30.6. deploy.sh ships the lockfile + `npm ci --omit=dev`, keeps excludes only on --delete (filter rules), post-deploy health + catalog check, rollback.
-- [ ] Structure: `scripts/` (deploy, epg, android), `test/` (integration, session, e2e, contract), root `npm test`; CI runs session suite + contract test + `npm audit --audit-level=high`, `permissions: contents: read`.
-- [ ] Docker: .dockerignore excludes keystores, prod-only deps, non-root user, compose works out of the box.
-- [ ] Docs: NEO_CONNECTOR (frozen contract + Sentinel + Neo), CLAUDE.md, README, DEPLOY, .env.example, tests.md, lessons.md updated; obsolete purge script removed; em dashes removed from tracked files.
+- [x] Deps: compression 1.8.2, express 4.22.3 (body-parser 1.20.8, qs 6.16.0), proxy-addr 2.0.8, undici 6.29.0 (major 6: VPS Node 20), react-router-dom 6.30.6; `playwright` ~1.63.0 declared as a root devDependency; `.nvmrc` 20.20.2, engines >=20.19. `scripts/deploy.sh` ships the lockfile + `npm ci --omit=dev -w server`, protect filters (`P`) instead of excludes, post-deploy health + catalog + frozen routes, one-level rollback + `--rollback`, `--apk FILE`.
+- [x] Structure: `scripts/` (deploy.sh, start.mjs, epg/), `test/` (run.mjs, contract, integration, proxy, account, catalog, session, e2e-smoke, verify-design), `docs/` (TESTS.md, android-tv.md legacy); root `npm test` / `npm start` (cross-platform) / `npm run verify:design` / `npm run test:e2e`; CI: `permissions: contents: read`, `.nvmrc`, undici-6 guard, typecheck, build, `--keys`, `npm test`, `npm audit --omit=dev --audit-level=high`, em dash guard. `tasks/purge-git-secret.sh` deleted.
+- [x] Docker: multi-stage (build / prod deps / runtime), `USER node`, state dirs chowned before the volumes, HEALTHCHECK on /api/health; .dockerignore excludes android/, keystores, apk/aab, test/, docs/, tasks/; compose fails fast without `JWT_SECRET` and reads `.env` when present (`docker compose config` validated; images not built: Docker daemon off).
+- [x] Docs: NEO_CONNECTOR (frozen contract table + consumers, additive fields, health 503 rule, 410, Android shell), CLAUDE.md 1/3/6/7/8, README (EN, new screenshots), DEPLOY (deploy/rollback, Stripe events, ALLOW_MOCK_BILLING, nginx document headers, Android publish gated), .env.example, docs/TESTS.md, SECURITY, CONTRIBUTING, lessons.md; `scripts/epg/grab.sh` + `curate-fr.sh` atomic writes; em dashes: 0 in tracked files.
+
+#### Review (OPS, 08/10)
+`npm audit --omit=dev`: 1 critical + 2 high + 5 moderate -> 2 moderate (react-router < 7 only: fix needs the v7 major, not taken; one is SSR-only (we are a client-only SPA), the other needs a user-controlled `<Link to>`/`navigate()` target (ours are app routes built in code)). `npm test`: contract 34, integration 66, proxy 70, account 83, catalog 45, session 83 = 381 checks green, seeded and cold (`NW_TEST_SEED=0`: catalog built from iptv-org, 200 real probes). Offline with no cache: clean SKIP (exit 0; `NW_TEST_STRICT=1` -> 1). e2e smoke 15/15 on a throwaway server (rewritten on the verifier contract, copy-agnostic). `scripts/deploy.sh` rehearsed end to end against a fake host (old layout with VPS-local lock + nested node_modules -> new layout, `--apk`, then `--rollback` back to the old layout; `.data`, `.env`, `epg.xml.gz`, acme kept, stale files deleted). NOT run against the VPS.
+Needs the owner: the nginx document headers (DEPLOY.md snippet), the deploy itself, the APK publish.
+
+#### Final review (08/10, whole branch vs main + working tree)
+Green: typecheck, build, `npm test` (6 suites, 381 checks), `--keys` (557), contract 34/34 on a throwaway server, e2e smoke 15/15, verifier 0 faults outside radio logo hosts, TV funnel at 960x540 (land -> OK plays, Back closes + restores focus, Back on a `/chaine/<id>` deep link goes Home). Fixed: Premium promo strip promised "no ads, bigger multi-view, your playlists" (not Premium features) -> the real ones, and hidden while `billing.checkout` is false; footer "Import a playlist" (opened Pricing, no such user feature) removed; off-air pill contrast (3.35:1 -> ink-2); TV focus lost on a same-page view change (category tile -> grid, Back -> Home); Android shell Back now calls `window.__nwBack()` first (a widget deep link went out of the app instead of Home; compiled, not run on a device); stale `tasks/verify-design.mjs` comments; CLAUDE.md sw.js line.
 
 ### Deploy (owner go-ahead required)
 - [ ] `bash scripts/deploy.sh` after all lots are green; tell sentinelhouse-c3 when live.
 
 ## Backlog / Next
 
-- [ ] Native PNG icons (192/512/maskable) for best iOS "Add to Home Screen".
-- [ ] Android TV / Smart TV: TWA wrapper or Tizen/webOS packaging.
+- [x] Native PNG icons (192/512/maskable) for best iOS "Add to Home Screen" (tracked in web/public).
+- [x] Android TV: WebView shell in `android/` (replaces the TWA, which showed nothing on TCL). Publish pending the owner. Tizen/webOS packaging still open.
 - [ ] Wire Stripe (keys pending) + real AdSense (client id pending).
 - [ ] Per-user custom sources + client-side `collections` prefs (server field exists).
-- [ ] Unit-test infra (vitest/node:test) to complement the integration suite.
+- [ ] Unit-test infra (node:test) for the pure parsers (parseM3U, parseXmltv, parseDurationMs, isPrivateIp) and the manifest rewrite, to complement `npm test`.
+- [ ] Neo service token (BIZ-13): read-only `/api/neo/stats` + blocklist write behind `NEO_SERVICE_TOKEN` (server change).
 - [ ] **"Sign out everywhere" button** (bump tokenVersion, hand a fresh token to this device) in the Account panel. Priority since v1.7: it is the only user-side way to kill a stolen token that keeps being used (sliding sessions removed the 30-day hard stop).
 - [ ] Optional absolute session cap (origin `iat` carried over on renewal, e.g. 1 year) -- owner's call.
 - [ ] Favorites roam reconstruction (server stores urls; needs by-url lookup to rebuild on a new device).
@@ -86,7 +94,7 @@ Owner request (06/10): sessions expired every 30 days (JWT_TTL), signing TVs out
 - [x] Revocation (did not exist): `tokenVersion` per user, claim `tv` in the JWT. Bumped on self password change (response hands this device a fresh token), admin password reset and admin disable. Legacy tokens/users (no field) == 0, so nothing is signed out at deploy.
 - [x] Web: `api.ts` swaps the renewed token on any response (localStorage -> other tabs); `Account.tsx` keeps the fresh token after a password change. Zero change in the auth store.
 - [x] CORS exposes `X-Renewed-Token`; `DATA_DIR`/`CACHE_DIR` env overrides (throwaway test servers); `JWT_RENEW_AFTER` validated at boot.
-- [x] `tasks/session-test.mjs` (60 checks, run with `JWT_TTL=8s JWT_RENEW_AFTER=3s`): active client survives > 2 x TTL, silent client expires, disabled/deleted/garbage never renewed, demoted admin gets `role:user`, password change revokes the other device, TV pairing token slides too, no token in the server log.
+- [x] `test/session-test.mjs` (60 checks, run with `JWT_TTL=8s JWT_RENEW_AFTER=3s`): active client survives > 2 x TTL, silent client expires, disabled/deleted/garbage never renewed, demoted admin gets `role:user`, password change revokes the other device, TV pairing token slides too, no token in the server log.
 - [x] Security review fixes: (1) BLOCKING -- the browser HTTP cache could replay a stored `X-Renewed-Token` (same ETag on `/api/config` for everyone, 304 merges stored headers) and switch the next user of a shared browser/TV into the previous account: every token-carrying response now goes through `handToken()` = `Cache-Control: no-store` + request validators dropped (full 200, never 304); `api.ts` additionally refuses a handed token for another `sub` or with an older `iat`. (2) `PUT /auth/password` put a pre-revocation token in the header: header == body now. (3) Admin resetting their own password via the admin panel keeps the device signed in. (4) `JWT_RENEW_AFTER=0` / `>= JWT_TTL` warn at boot.
 
 ### Review (v1.7)

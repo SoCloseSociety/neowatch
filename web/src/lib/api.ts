@@ -7,10 +7,25 @@ const TOKEN_KEY = 'neowatch.token';
 let token: string | null = null;
 try { token = localStorage.getItem(TOKEN_KEY); } catch { /* storage blocked */ }
 
-// Reflect login/logout that happened in another tab.
+// Hooks the auth store registers (this module stays free of store imports).
+//   tokenChanged: another tab signed in, signed out or switched account.
+//   authLost: the server answered as if we were anonymous while we sent a token.
+type TokenListener = (next: string | null, prev: string | null) => void;
+let tokenListener: TokenListener | null = null;
+let authLostListener: (() => void) | null = null;
+export function onTokenChanged(fn: TokenListener | null) { tokenListener = fn; }
+export function onAuthLost(fn: (() => void) | null) { authLostListener = fn; }
+
+// Reflect login/logout that happened in another tab. The auth store decides what it
+// means for the signed-in user (sign out, refresh the account, or nothing).
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
-    if (e.key === TOKEN_KEY) token = e.newValue;
+    if (e.key !== TOKEN_KEY && e.key !== null) return; // null = localStorage.clear()
+    const next = e.key === null ? null : e.newValue;
+    if (next === token) return;
+    const prev = token;
+    token = next;
+    try { tokenListener?.(next, prev); } catch { /* listener errors never break storage sync */ }
   });
 }
 
@@ -28,7 +43,7 @@ export function getToken() {
 
 // Unverified read of the JWT payload (the server is the only verifier; this is just to
 // compare a handed token with the one we hold).
-function claims(t: string): { sub?: string; iat?: number; tv?: number } | null {
+export function claims(t: string): { sub?: string; iat?: number; tv?: number } | null {
   try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch { return null; }
 }
 // A handed token is adopted only for the SAME account, for a session generation (`tv`,
@@ -52,14 +67,20 @@ export function adoptToken(next: string | null | undefined): boolean {
   if (!next || !token || next === token || !acceptable(next, token)) return false;
   let stored: string | null = token;
   try { stored = localStorage.getItem(TOKEN_KEY); } catch { /* storage blocked: memory is the truth */ }
-  if (stored !== token) { token = stored; return false; } // the session moved under us: follow it
+  if (stored !== token) { // the session moved under us: follow it
+    const prev = token;
+    token = stored;
+    try { tokenListener?.(stored, prev); } catch { /* */ }
+    return false;
+  }
   setToken(next);
   return true;
 }
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const headers = new Headers(opts.headers);
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const sent = token;
+  if (sent) headers.set('Authorization', `Bearer ${sent}`);
   if (opts.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
 
   const res = await fetch(`/api${path}`, { ...opts, headers });
@@ -71,6 +92,13 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const data = ct.includes('application/json') ? await res.json() : await res.text();
   if (!res.ok) {
     const msg = (data && (data as any).error) || res.statusText;
+    // WEB-11: a revoked or expired token is ignored by the server (requests run as
+    // anonymous), and user routes answer 401 'authentication required'. Only that exact
+    // answer, for the token we still hold, asks the auth store to re-check /auth/me (a
+    // wrong current password is a 401 with another message and must not sign out).
+    if (res.status === 401 && sent && sent === token && msg === 'authentication required' && !path.startsWith('/auth/me')) {
+      try { authLostListener?.(); } catch { /* */ }
+    }
     throw new ApiError(msg, res.status, data);
   }
   return data as T;

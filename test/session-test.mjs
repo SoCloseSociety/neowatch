@@ -6,7 +6,7 @@
 //
 // Run against a server started with a SHORT ttl + threshold, e.g.
 //   JWT_TTL=8s JWT_RENEW_AFTER=3s ADMIN_EMAIL=... ADMIN_PASSWORD=... PORT=8790 node server/src/index.js
-//   BASE=http://localhost:8790 TTL_S=8 RENEW_S=3 ADMIN_EMAIL=... ADMIN_PASSWORD=... node tasks/session-test.mjs
+//   BASE=http://localhost:8790 TTL_S=8 RENEW_S=3 ADMIN_EMAIL=... ADMIN_PASSWORD=... node test/session-test.mjs
 // Admin creds come from env only -- never hardcode them.
 
 const BASE = process.env.BASE || 'http://localhost:8787';
@@ -389,10 +389,14 @@ const issued = []; // every token we see -- used at the end to grep the server l
       check('control: the due token IS renewed on a normal route', ctl.status === 200 && !!ctl.renewed);
       if (ctl.renewed) issued.push(ctl.renewed);
       const px = await req(`/api/proxy?url=${encodeURIComponent(target)}&lan=1&exp=${exp}&sig=${sig}`, { token: due });
-      if (px.status === 403 || px.status === 502) console.log(`  SKIP  proxy answered ${px.status}: start the test server with ALLOW_PRIVATE_SOURCES=true for this section`);
-      check('proxy with a due token -> 200 from the upstream', px.status === 200 && px.data === 'segment', `status=${px.status}`);
-      check('proxy response carries NO X-Renewed-Token (no renewal on /api/proxy)', !px.renewed, px.renewed ? `header present (${px.renewed === forged ? 'upstream\'s forged token passed through' : 'renewal'})` : '');
-      check('upstream X-Renewed-Token header is stripped', px.renewed !== forged);
+      if (px.status === 403 || px.status === 502) {
+        // A real skip: the local upstream is refused without ALLOW_PRIVATE_SOURCES=true.
+        console.log(`  SKIP  proxy answered ${px.status}: start the test server with ALLOW_PRIVATE_SOURCES=true for this section`);
+      } else {
+        check('proxy with a due token -> 200 from the upstream', px.status === 200 && px.data === 'segment', `status=${px.status}`);
+        check('proxy response carries NO X-Renewed-Token (no renewal on /api/proxy)', !px.renewed, px.renewed ? `header present (${px.renewed === forged ? 'upstream\'s forged token passed through' : 'renewal'})` : '');
+        check('upstream X-Renewed-Token header is stripped', px.renewed !== forged);
+      }
     } finally {
       upstream.close();
     }

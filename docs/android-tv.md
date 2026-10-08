@@ -1,5 +1,14 @@
 # NEOWATCH -- Android / Android TV / Play Store (TWA)
 
+> **LEGACY (kept for history, 08/10/2026).** The TWA described below (Bubblewrap / PWABuilder,
+> config in the repo-root `twa-manifest.json`) is replaced by the plain WebView shell in
+> [`android/`](../android/README.md): TCL Google TVs ship no Chrome, so the TWA showed nothing.
+> Same package `co.soclose.neowatch.twa` (FROZEN), same signing key, so the shell installs over
+> the TWA and `assetlinks.json` stays valid. Do NOT re-run `bubblewrap build` or publish a TWA
+> again. Build and publish the shell with `android/README.md` and DEPLOY.md ("Android app").
+> `twa-manifest.json` is not used by any build; its version fields (1.0.0 / 1) are stale.
+
+
 NEOWATCH is an installable PWA, so it wraps into a native Android app via a
 **Trusted Web Activity (TWA)** -- the app is a thin shell that loads
 `https://neowatch.soclose.co` full-screen (no browser URL bar once verified).
@@ -17,7 +26,7 @@ In the app, the **Installer** button (TopBar) shows a **QR code** + steps:
 2. Package For Stores -> **Android** -> Generate. It produces a signed `.aab` + `.apk`
    and an `assetlinks.json` snippet containing your **SHA-256 signing fingerprint**.
 3. Put that fingerprint into `web/public/.well-known/assetlinks.json`
-   (replace `REPLACE_WITH_YOUR_APP_SIGNING_SHA256_FINGERPRINT`) and redeploy
+   (already done: the deployed fingerprint is `C8:6E:...:F2:61`) and redeploy
    (rsync `web/dist/` -> `/var/www/neowatch/`). This removes the URL bar.
 4. Upload the `.aab` to Google Play Console (or sideload the `.apk` on a TV).
 
@@ -85,7 +94,7 @@ Alternatively regenerate via **PWABuilder** and apply the same manifest edit in 
 ## Digital Asset Links
 - Served at `https://neowatch.soclose.co/.well-known/assetlinks.json` (static, via nginx).
 - Verifies the app<->domain link so the TWA opens chrome-less. Must contain the
-  exact `package_name` (`co.soclose.neowatch`) + your signing-key SHA-256.
+  exact `package_name` (`co.soclose.neowatch.twa`) + your signing-key SHA-256.
 
 ## Note on icons
 - The PWA currently ships SVG icons. PWABuilder/Bubblewrap auto-generate the

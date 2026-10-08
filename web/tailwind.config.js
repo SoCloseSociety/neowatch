@@ -1,8 +1,8 @@
 /** @type {import('tailwindcss').Config} */
 // Sentinel TV OS tokens (index.css :root, Lunaire + Doux). Every colour reads a
 // CSS variable, so the theme switch is a `data-theme` flip and nothing else.
-// The existing class names are kept and re-pointed (spec 1.2): `accent` is BONE
-// (the primary, the selection, the focus), never mint; mint is `ok` (state only).
+// The primary and the focus are bone (`primary`, `primary-ink`); mint is a state
+// colour only (OK), never a control.
 const rgbVar = (name) => `rgb(var(${name}) / <alpha-value>)`;
 
 export default {
@@ -18,19 +18,12 @@ export default {
   theme: {
     extend: {
       colors: {
-        accent: rgbVar('--accent-rgb'),
-        'accent-soft': 'rgb(var(--accent-rgb) / 0.08)',
         ink: rgbVar('--ink'),
         'ink-2': rgbVar('--ink-2'),
         'ink-3': rgbVar('--ink-3'),
         surface: rgbVar('--surface'),
-        panel: rgbVar('--panel'),
-        'panel-2': rgbVar('--panel-2'),
-        // State colours (word + glyph always go with them).
-        live: rgbVar('--live'),
-        gold: rgbVar('--gold'),
-        ok: rgbVar('--ok'),
-        // New token colours (no alpha modifier: they are full colours).
+        // Token colours (no alpha modifier: they are full colours). State colours
+        // (mint, amber, red) always go with a word and a glyph.
         line: 'var(--line)',
         'line-soft': 'var(--line-soft)',
         'line-strong': 'var(--line-strong)',
@@ -39,8 +32,6 @@ export default {
         mint: 'var(--mint)',
         amber: 'var(--amber)',
         red: 'var(--red)',
-        cyan: 'var(--cyan)',
-        violet: 'var(--violet)',
         card: 'var(--surface-carte)',
         mini: 'var(--surface-mini)',
         pillbg: 'var(--surface-pill)',
@@ -83,19 +74,12 @@ export default {
       transitionTimingFunction: {
         ease: 'var(--ease)',
       },
-      // Only transform/opacity animate (Sentinel rule). One stepped pulse for
-      // the LIVE point, one fade. pulse-live, pulse-green, shimmer, rise and
-      // kenburns are gone: a leftover class is a harmless no-op.
+      // Only transform/opacity animate (Sentinel rule): one fade here; the LIVE
+      // point's stepped pulse is .pill-pulse in index.css.
       animation: {
-        // Two states (on 1.2 s / dim 1.2 s), no interpolation: cheap on a TV SoC.
-        'pulse-red': 'nwPulse 2.4s steps(1, end) infinite',
         'fade-in': 'fadeIn var(--d2) var(--ease)',
       },
       keyframes: {
-        nwPulse: {
-          '0%': { opacity: '1' },
-          '50%, 100%': { opacity: '.35' },
-        },
         fadeIn: {
           from: { opacity: '0' },
           to: { opacity: '1' },

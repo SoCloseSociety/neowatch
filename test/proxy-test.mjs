@@ -6,7 +6,7 @@
 // Run against a live (throwaway) server started with ALLOW_PRIVATE_SOURCES=true
 // (the crafted upstream is on 127.0.0.1) and a known JWT_SECRET:
 //   ALLOW_PRIVATE_SOURCES=true JWT_SECRET=... ADMIN_EMAIL=... ADMIN_PASSWORD=... PORT=8918 node server/src/index.js
-//   BASE=http://localhost:8918 JWT_SECRET=... ADMIN_EMAIL=... ADMIN_PASSWORD=... node tasks/s1-test.mjs
+//   BASE=http://localhost:8918 JWT_SECRET=... ADMIN_EMAIL=... ADMIN_PASSWORD=... node test/proxy-test.mjs
 // Env: BASE, JWT_SECRET (the TEST server's, to sign/forge proxy URLs), ADMIN_EMAIL,
 // ADMIN_PASSWORD, UPSTREAM_PORT (default 8919). Secrets come from env only.
 import { createServer } from 'node:http';

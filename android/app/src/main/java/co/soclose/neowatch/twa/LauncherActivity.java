@@ -497,6 +497,24 @@ public class LauncherActivity extends Activity {
             exitFullscreen();
             return;
         }
+        if (web != null && !showingError) {
+            // The web app's ONE Back contract (spatialNav.ts window.__nwBack): closes the top
+            // layer, goes back a page, or from a deep link with no history (a widget opening
+            // /chaine/<id>) goes to the home page instead of leaving. true = handled, false =
+            // "nothing left here" (second Back on the home page): leave. No hook (an older
+            // site, a page still loading): the plain history Back below.
+            web.evaluateJavascript("(function(){try{return window.__nwBack?!!window.__nwBack():null;}"
+                    + "catch(e){return null;}})()", v -> {
+                if ("true".equals(v)) return;
+                if ("false".equals(v)) finish();
+                else historyBack();
+            });
+            return;
+        }
+        historyBack();
+    }
+
+    private void historyBack() {
         if (web != null && web.canGoBack()) {
             mainFrameFailed = false;
             web.goBack();

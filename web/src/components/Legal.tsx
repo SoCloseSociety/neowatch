@@ -1,68 +1,113 @@
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ScrollText, ShieldCheck } from 'lucide-react';
-import { useT } from '@/lib/i18n';
+import { ArrowLeft } from 'lucide-react';
+import { useT, fmtDate } from '@/lib/i18n';
+import { useAuth } from '@/store/authStore';
+import { useUI } from '@/store/uiStore';
+import { Overline, btnClass } from './ui';
 
-// Terms of use + privacy policy, on one page with anchors (#cgu / #confidentialite).
-// FR-first legal copy (primary market); the structure is what matters for go-live.
+/** Legal and takedown contact (also used by "Report this channel"). */
+export const LEGAL_CONTACT = 'sin.soclose@gmail.com';
+/** Publisher named in the legal notice. */
+const PUBLISHER = 'SoClose';
+const UPDATED = new Date(2026, 9, 8);
+
+interface Section { id: string; title: string; paras: string[] }
+
+// Terms of use + legal notice + privacy policy on one page, with anchors
+// (#cgu, #mentions, #confidentialite). Every sentence is in lib/i18n/pages.ts
+// (EN, FR, RU). The ads statement matches the app: ads only for free users, only
+// on Movies and Radio, only after consent.
+const TERMS: Section[] = [
+  { id: 'service', title: 'pages.legal.s1', paras: ['pages.legal.s1a', 'pages.legal.s1b', 'pages.legal.s1c'] },
+  { id: 'content', title: 'pages.legal.s2', paras: ['pages.legal.s2a', 'pages.legal.s2b', 'pages.legal.s2c'] },
+  { id: 'use', title: 'pages.legal.s3', paras: ['pages.legal.s3a'] },
+  { id: 'premium', title: 'pages.legal.s4', paras: ['pages.legal.s4a', 'pages.legal.s4b'] },
+  { id: 'warranty', title: 'pages.legal.s5', paras: ['pages.legal.s5a'] },
+];
+const PRIVACY: Section[] = [
+  { id: 'data', title: 'pages.legal.p1', paras: ['pages.legal.p1a', 'pages.legal.p1b'] },
+  { id: 'device', title: 'pages.legal.p2', paras: ['pages.legal.p2a'] },
+  { id: 'ads', title: 'pages.legal.p3', paras: ['pages.legal.p3a', 'pages.legal.p3b'] },
+  { id: 'logs', title: 'pages.legal.p4', paras: ['pages.legal.p4a'] },
+  { id: 'rights', title: 'pages.legal.p5', paras: ['pages.legal.p5a', 'pages.legal.p5b', 'pages.legal.p5c'] },
+  { id: 'playback', title: 'pages.legal.p6', paras: ['pages.legal.p6a'] },
+];
+
 export function Legal() {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const t = useT();
+  const user = useAuth((s) => s.user);
+  const setAccount = useUI((s) => s.setAccount);
+  const setLogin = useUI((s) => s.setLogin);
 
   useEffect(() => {
     if (!hash) return;
     document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' });
   }, [hash]);
 
+  const back = () => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) navigate(-1);
+    else navigate('/');
+  };
+  const updated = t('pages.legal.updated', { date: fmtDate(UPDATED, { month: 'long', year: 'numeric' }) });
+  const mail = <a href={`mailto:${LEGAL_CONTACT}`} className="font-mono text-ink underline underline-offset-2" translate="no">{LEGAL_CONTACT}</a>;
+
+  const renderSections = (list: Section[]) =>
+    list.map((s) => (
+      <section key={s.id} aria-labelledby={`legal-${s.id}`} className="mt-7">
+        <h3 id={`legal-${s.id}`} className="m-0 mb-2 text-carte font-semibold text-ink">{t(s.title)}</h3>
+        {s.paras.map((p) => <p key={p} className="m-0 mb-2 text-corps text-ink-2">{t(p)}</p>)}
+        {s.id === 'rights' && <p className="m-0 mb-2 text-corps text-ink-2">{t('pages.legal.p5d')} {mail}</p>}
+      </section>
+    ));
+
   return (
     <main className="flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-[860px] px-5 py-8 text-[13.5px] leading-relaxed text-ink-2">
-        <button onClick={() => navigate(-1)} className="mb-6 flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[12px] text-ink-2 hover:border-accent hover:text-accent">
-          <ArrowLeft size={14} /> {t('detail.back')}
+      <div className="mx-auto w-full max-w-[860px] px-[var(--gouttiere)] pb-16 pt-6">
+        <button type="button" onClick={back} className={btnClass('quiet', { className: 'mb-6 px-3' })} aria-label={t('detail.back')}>
+          <ArrowLeft size={16} aria-hidden="true" /> {t('detail.back')}
         </button>
 
-        <section id="cgu" className="mb-12 scroll-mt-6">
-          <h1 className="mb-1 flex items-center gap-2 text-[24px] font-extrabold text-ink"><ScrollText size={22} className="text-accent" /> Conditions d'utilisation</h1>
-          <p className="mb-5 font-mono text-[11px] text-ink-3">Dernière mise à jour : juin 2026</p>
-
-          <h2 className="mb-1.5 mt-6 text-[16px] font-bold text-ink">1. Le service</h2>
-          <p>NEOWATCH est un agrégateur et lecteur de flux audiovisuels librement accessibles au public : chaînes de télévision référencées par l'annuaire communautaire <a href="https://iptv-org.github.io" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">iptv-org</a>, radios référencées par l'annuaire <a href="https://www.radio-browser.info" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">radio-browser</a>, et films du domaine public hébergés par <a href="https://archive.org" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">Internet Archive</a>. NEOWATCH n'héberge, ne produit et ne modifie aucun contenu audiovisuel : le service indexe des flux publiés et rendus publiquement accessibles par leurs diffuseurs respectifs, et les lit depuis leur source.</p>
-
-          <h2 className="mb-1.5 mt-6 text-[16px] font-bold text-ink">2. Contenus tiers</h2>
-          <p>Les flux référencés appartiennent à leurs diffuseurs. Leur disponibilité, leur qualité et leur licéité relèvent de la responsabilité de leurs éditeurs. Si vous êtes ayant droit d'un contenu référencé et souhaitez son retrait, contactez-nous (section 6) : le flux sera déréférencé rapidement. L'abonnement Premium rémunère exclusivement des fonctionnalités logicielles du service (multi-écran, guide TV, absence de publicité, synchronisation, playlists personnelles) et en aucun cas l'accès à des contenus de tiers.</p>
-
-          <h2 className="mb-1.5 mt-6 text-[16px] font-bold text-ink">3. Usage acceptable</h2>
-          <p>Vous vous engagez à utiliser NEOWATCH dans le respect du droit applicable dans votre pays, à ne pas revendre l'accès au service, à ne pas tenter de contourner ses limitations techniques et à ne pas l'utiliser pour porter atteinte aux droits de tiers.</p>
-
-          <h2 className="mb-1.5 mt-6 text-[16px] font-bold text-ink">4. Abonnement et paiement</h2>
-          <p>L'abonnement Premium est facturé au tarif affiché sur la page Premium, pour la durée indiquée, sans reconduction cachée. Il peut être résilié à tout moment depuis le compte ; l'accès Premium reste actif jusqu'à la fin de la période payée. Le paiement est traité par un prestataire tiers (Stripe) ; NEOWATCH ne stocke aucune donnée bancaire.</p>
-
-          <h2 className="mb-1.5 mt-6 text-[16px] font-bold text-ink">5. Garanties et responsabilité</h2>
-          <p>Le service est fourni « en l'état ». La disponibilité des flux tiers n'est pas garantie. NEOWATCH ne saurait être tenu responsable des interruptions, des contenus diffusés par les chaînes tierces, ni des dommages indirects liés à l'utilisation du service.</p>
-
-          <h2 className="mb-1.5 mt-6 text-[16px] font-bold text-ink">6. Contact</h2>
-          <p>Pour toute question, demande de retrait ou réclamation : <span className="font-mono text-accent">sin.soclose@gmail.com</span>.</p>
+        <section id="cgu" className="scroll-mt-6">
+          <Overline>{t('footer.legal')}</Overline>
+          <h2 className="m-0 mt-1 text-titre font-semibold text-ink">{t('pages.legal.termsTitle')}</h2>
+          <p className="meta m-0 mt-2">{updated}</p>
+          {renderSections(TERMS)}
         </section>
 
-        <section id="confidentialite" className="scroll-mt-6">
-          <h1 className="mb-1 flex items-center gap-2 text-[24px] font-extrabold text-ink"><ShieldCheck size={22} className="text-accent" /> Politique de confidentialité</h1>
-          <p className="mb-5 font-mono text-[11px] text-ink-3">Dernière mise à jour : juin 2026</p>
+        <section id="mentions" className="mt-12 scroll-mt-6" aria-labelledby="legal-notice">
+          <h2 id="legal-notice" className="m-0 text-titre2 font-semibold text-ink">{t('pages.legal.noticeTitle')}</h2>
+          <dl className="m-0 mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-corps">
+            <dt className="text-ink-3">{t('pages.legal.publisher')}</dt>
+            <dd className="m-0 text-ink" translate="no">{PUBLISHER} · NEOWATCH</dd>
+            <dt className="text-ink-3">{t('pages.legal.contact')}</dt>
+            <dd className="m-0">{mail}</dd>
+            <dt className="text-ink-3">{t('pages.legal.host')}</dt>
+            <dd className="m-0 text-ink-2">{t('pages.legal.hostValue')}</dd>
+          </dl>
+        </section>
 
-          <h2 className="mb-1.5 mt-6 text-[16px] font-bold text-ink">1. Données collectées</h2>
-          <p>Compte : adresse email, nom facultatif, mot de passe (stocké haché avec bcrypt, jamais en clair), plan d'abonnement, favoris et configuration multi-écran si vous choisissez de les synchroniser. Aucune donnée bancaire n'est stockée par NEOWATCH (paiement traité par Stripe). Le service n'utilise pas de traceurs publicitaires tiers ni de revente de données.</p>
+        <section id="retrait" className="mt-12 scroll-mt-6 rounded-card border border-line bg-card p-[var(--pad-panneau)]" aria-labelledby="legal-takedown">
+          <h2 id="legal-takedown" className="m-0 text-titre2 font-semibold text-ink">{t('pages.legal.takedownTitle')}</h2>
+          <p className="m-0 mt-3 text-corps text-ink-2">{t('pages.legal.takedownA')}</p>
+          <p className="m-0 mt-2 text-corps text-ink-2">{t('pages.legal.takedownB')}</p>
+          <p className="m-0 mt-3 text-corps">{mail}</p>
+        </section>
 
-          <h2 className="mb-1.5 mt-6 text-[16px] font-bold text-ink">2. Stockage local</h2>
-          <p>L'application enregistre dans votre navigateur (localStorage) vos préférences d'affichage, votre thème, vos favoris locaux, vos recherches récentes et votre jeton de session. Ces données restent sur votre appareil et peuvent être effacées en vidant les données du site.</p>
-
-          <h2 className="mb-1.5 mt-6 text-[16px] font-bold text-ink">3. Journaux techniques</h2>
-          <p>Le serveur conserve des journaux techniques minimaux (erreurs, limitation de débit par adresse IP) nécessaires à la sécurité et au bon fonctionnement, purgés régulièrement.</p>
-
-          <h2 className="mb-1.5 mt-6 text-[16px] font-bold text-ink">4. Vos droits (RGPD)</h2>
-          <p>Vous pouvez consulter, corriger ou supprimer vos données à tout moment : la suppression de compte est disponible directement dans le panneau « Mon compte » et efface immédiatement l'ensemble des données associées (email, favoris, configuration). Pour toute autre demande : <span className="font-mono text-accent">sin.soclose@gmail.com</span>.</p>
-
-          <h2 className="mb-1.5 mt-6 text-[16px] font-bold text-ink">5. Lecture des flux</h2>
-          <p>La lecture s'effectue en priorité directement depuis la source du diffuseur : votre adresse IP est alors visible de ce diffuseur, comme pour toute lecture web. Lorsqu'un flux nécessite le relais du serveur NEOWATCH (compatibilité technique), c'est l'adresse du serveur qui est visible de la source.</p>
+        <section id="confidentialite" className="mt-12 scroll-mt-6">
+          <h2 className="m-0 text-titre font-semibold text-ink">{t('pages.legal.privacyTitle')}</h2>
+          <p className="meta m-0 mt-2">{updated}</p>
+          {renderSections(PRIVACY)}
+          <button
+            type="button"
+            onClick={() => (user ? setAccount(true) : setLogin(true))}
+            className={btnClass('secondary', { className: 'mt-5' })}
+          >
+            {user ? t('pages.legal.openAccount') : t('link.signin')}
+          </button>
         </section>
       </div>
     </main>

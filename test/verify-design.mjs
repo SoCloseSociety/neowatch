@@ -4,11 +4,11 @@
 // SentinelHouse tools/verifier-charte.js (mesurerPage, jugerFocus, mesurerContraste).
 //
 // Usage:
-//   node tasks/verify-design.mjs <port|--base URL> [--pages home,search,grid,detail,guide,films,radios,player,multi,login,pricing,settings]
+//   node test/verify-design.mjs <port|--base URL> [--pages home,search,grid,detail,guide,films,radios,player,multi,login,pricing,settings]
 //     [--formats desktop,phone,tv,tv1080] [--langs en,fr,ru] [--themes lunaire,doux]
 //     [--out DIR] [--label NAME] [--measure] [--gestures] [--migration] [--allow-dev]
-//   node tasks/verify-design.mjs --tokens <SentinelHouse>/08-sentinel-home/sentinel_home/ui/charte.css
-//   node tasks/verify-design.mjs --keys          (static: every t('key') used in web/src exists in EN/FR/RU)
+//   node test/verify-design.mjs --tokens <SentinelHouse>/08-sentinel-home/sentinel_home/ui/charte.css
+//   node test/verify-design.mjs --keys          (static: every t('key') used in web/src exists in EN/FR/RU)
 //
 // Server: a THROWAWAY one, never the dev server on 8787 (refused unless --allow-dev):
 //   PORT=8931 DATA_DIR=<scratch>/data CACHE_DIR=<scratch>/cache node server/src/index.js
@@ -149,7 +149,7 @@ if (opts.base) {
 } else {
   const port = positional[0] || '';
   if (!/^\d+$/.test(port)) {
-    console.error('usage: node tasks/verify-design.mjs <port|--base URL> [options] (see the header)');
+    console.error('usage: node test/verify-design.mjs <port|--base URL> [options] (see the header)');
     process.exit(2);
   }
   if (port === '8787' && !opts['allow-dev']) {
@@ -201,12 +201,16 @@ const OPENERS = {
   multi: { keys: ['nav.multi', 'top.multi'], labels: ['Multi-view', 'Multi-écran', 'Мультиэкран'] },
   login: { keys: ['top.login'], labels: ['Sign in', 'Connexion', 'Se connecter', 'Войти'] },
   pricing: { keys: ['promo.discover', 'menu.premium', 'top.premium'], labels: ['See plans', 'Discover', 'Découvrir', 'Voir les offres', 'Passer Premium', 'Go Premium', 'Premium'] },
-  settings: { keys: ['top.settings', 'menu.settings'], labels: ['Settings', 'Réglages', 'Настройки'] },
+  // Settings lives in the avatar menu: open it first (`pre`), then the entry.
+  settings: { pre: '[data-avatar]', keys: ['top.settings', 'menu.settings'], labels: ['Settings', 'Réglages', 'Настройки'] },
 };
 
 // ── in the page: the static measures ─────────────────────────────────────
 function measurePage({ lang }) {
-  const T = window.__nwT || null;
+  // Same normalisation as the page text below (formatted numbers carry no-break
+  // spaces: "2 486 chaînes" must match its t() string).
+  const norm = (x) => String(x).replace(/\s+/g, ' ').trim();
+  const T = window.__nwT ? new Set([...window.__nwT].map(norm)) : null;
   const DICT = window.__nwDict || null;
   const visible = (el) => {
     if (!el || !el.checkVisibility || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
@@ -237,7 +241,7 @@ function measurePage({ lang }) {
   const curLangValues = new Set();
   if (DICT) {
     for (const e of Object.values(DICT)) {
-      for (const [l, v] of Object.entries(e)) (l === lang ? curLangValues : otherLangValues).add(String(v).trim());
+      for (const [l, v] of Object.entries(e)) (l === lang ? curLangValues : otherLangValues).add(norm(v));
     }
     for (const v of curLangValues) otherLangValues.delete(v);
   }
@@ -369,6 +373,8 @@ function measurePage({ lang }) {
       }
     }
     if (onMedia) { r.contrastOnMedia = (r.contrastOnMedia || 0) + 1; continue; }
+    // The hero is art under a scrim: the pixel method (heroContrast) measures it.
+    if (el.closest('[data-hero]')) continue;
     const bg = bgOf(el);
     if (!bg) continue;
     const s = getComputedStyle(el);
@@ -730,6 +736,10 @@ for (const theme of THEMES) {
           await page.goto(withTv, { waitUntil: 'domcontentloaded', timeout: 45000 });
           await page.waitForTimeout(3500);
           if (overlay) {
+            if (OPENERS[overlay].pre) {
+              await page.locator(OPENERS[overlay].pre).first().click({ timeout: 3000 }).catch(() => {});
+              await page.waitForTimeout(400);
+            }
             entry.opened = await clickByLabel(page, OPENERS[overlay], lang);
             await page.waitForTimeout(overlay === 'player' ? 4000 : 1500);
           }

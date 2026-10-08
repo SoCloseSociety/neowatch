@@ -10,25 +10,16 @@ import { isTV, prefersReducedMotion } from '@/lib/device';
 // only break that meaning.
 export type ThemeName = 'lunaire' | 'doux';
 
-// `surface` is a swatch preview (RGB of --e-fond), kept so the Settings panel
-// can draw a sample until Lot C redraws it.
+// `surface` is the swatch the Settings panel draws (RGB of --e-fond).
 export const THEMES: Record<ThemeName, { surface: [number, number, number]; themeColor: string }> = {
   lunaire: { surface: [5, 7, 10], themeColor: '#05070a' },
   doux: { surface: [243, 236, 223], themeColor: '#f3ecdf' },
 };
 
-/**
- * @deprecated The accent picker is gone (spec 1.4). Kept empty so the current
- * Settings panel still compiles and renders no swatch. Lot C removes the use.
- */
-export const ACCENTS: Record<string, [number, number, number]> = {};
-
 export type Density = 'comfortable' | 'compact' | 'cozy';
 
 interface SettingsState {
   theme: ThemeName;
-  /** @deprecated Ignored and never persisted (spec 1.4). Lot C removes the picker. */
-  accent?: string;
   density: Density;
   defaultMuted: boolean;
   autoplay: boolean;
@@ -38,7 +29,7 @@ interface SettingsState {
   set: (patch: Partial<SettingsState>) => void;
 }
 
-type Persisted = Omit<SettingsState, 'set' | 'accent'>;
+type Persisted = Omit<SettingsState, 'set'>;
 
 function normalizeTheme(v: unknown): ThemeName {
   return v === 'doux' ? 'doux' : 'lunaire';
@@ -57,7 +48,6 @@ export const useSettings = create<SettingsState>()(
       showOffline: true,
       set: (patch) => {
         const rest = { ...patch };
-        delete rest.accent;
         if ('theme' in rest) rest.theme = normalizeTheme(rest.theme);
         set(rest);
       },
@@ -66,7 +56,7 @@ export const useSettings = create<SettingsState>()(
       name: 'neowatch.settings',
       version: 2,
       // v0/v1 stored { accent, theme: midnight|black|slate|carbon, ... }.
-      // Every old dark theme becomes Lunaire, the accent is dropped.
+      // Every old dark theme becomes Lunaire, the stored accent is dropped.
       migrate: (persisted) => {
         const s = { ...((persisted as Record<string, unknown>) || {}) };
         delete s.accent;

@@ -1,139 +1,156 @@
+import { useState } from 'react';
 import { clsx } from 'clsx';
-import { Wifi, Globe2, RefreshCw, LayoutGrid } from 'lucide-react';
+import { RefreshCw, SlidersHorizontal } from 'lucide-react';
 import { useCatalog } from '@/store/catalogStore';
-import { useSettings, type Density } from '@/store/settingsStore';
 import { categoryLabel } from '@/lib/format';
-import { useT } from '@/lib/i18n';
+import { fmtAge, fmtNum, fmtTime, useT } from '@/lib/i18n';
+import { Meta } from './ui';
+import { countryLabel, languageLabel } from './ChannelCard';
 
+// One row (spec section 5, Lot A): title + mono count + list age on the left;
+// Category, Country, Language, "Online only", "Playable here" and "Check again"
+// on the right. On a phone the controls fold behind one "Filters" button so the
+// first card stays near the top (UX-20). Sort and grid size live in Settings.
 export function FilterBar() {
-  // Field selectors so the bar re-renders only on the slices it uses.
+  const t = useT();
   const filters = useCatalog((s) => s.filters);
   const setFilters = useCatalog((s) => s.setFilters);
   const total = useCatalog((s) => s.total);
   const channels = useCatalog((s) => s.channels);
   const checkHealth = useCatalog((s) => s.checkHealth);
   const meta = useCatalog((s) => s.meta);
-  const { density, set: setSettings } = useSettings();
-  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const [checking, setChecking] = useState(false);
 
+  const q = filters.q.trim();
   const title = filters.favoritesOnly
-    ? t('home.favorites')
+    ? t('home.myListTitle')
+    : q
+    ? t('search.resultsFor', { q })
     : filters.foot
-    ? '⚽ Football & Sport'
+    ? t('cat.foot')
     : filters.category
     ? categoryLabel(filters.category)
-    : filters.q
-    ? `Résultats pour « ${filters.q} »`
     : t('filter.allChannels');
 
+  const active = [filters.category && !filters.foot, filters.country, filters.language, filters.onlineOnly, filters.hideGeoBlocked].filter(Boolean).length;
+
+  const check = async () => {
+    setChecking(true);
+    try {
+      await checkHealth(channels, true);
+    } finally {
+      setChecking(false);
+      setCheckedAt(Date.now());
+    }
+  };
+
   return (
-    <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-white/[0.06] bg-surface/95 px-4 py-2 backdrop-blur-xl">
-      <div className="flex items-baseline gap-2">
-        <h1 className="text-sm font-semibold text-ink">{title}</h1>
-        {!filters.favoritesOnly && <span className="font-mono text-[11px] text-ink/40">{total.toLocaleString('fr')}</span>}
+    <div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-line bg-surface/95 px-[var(--gouttiere)] py-3 backdrop-blur-xl [:root[data-tv]_&]:backdrop-blur-none">
+      <div className="min-w-0 flex-1 sm:flex-none">
+        <h1 className="m-0 truncate text-rangee font-semibold text-ink" translate={q ? 'no' : undefined}>
+          {title}
+        </h1>
+        <Meta
+          parts={[
+            filters.favoritesOnly ? t.n('count.channels', channels.length) : t.n('count.channels', total),
+            meta?.updatedAt ? t('filterbar.listFrom', { time: fmtTime(meta.updatedAt) }) : null,
+          ]}
+        />
       </div>
 
-      <div className="ml-auto flex flex-wrap items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="btn btn-secondary sm:hidden"
+      >
+        <SlidersHorizontal size={16} aria-hidden="true" />
+        {t('filterbar.filters')}
+        {active > 0 && <span className="font-mono text-meta text-ink-2">{fmtNum(active)}</span>}
+      </button>
+
+      <div className={clsx('w-full flex-wrap items-center gap-2 sm:ml-auto sm:flex sm:w-auto', open ? 'flex' : 'hidden')}>
         {meta && (
           <>
             <select
-              value={filters.category || ''}
+              value={filters.foot ? '' : filters.category || ''}
               onChange={(e) => setFilters({ category: e.target.value || null, foot: false, favoritesOnly: false })}
-              className="h-8 w-full rounded-lg border border-white/[0.06] bg-black/30 px-2 text-[11px] text-ink/70 focus:border-accent/40 focus:outline-none sm:w-auto"
-              title="Catégorie"
+              className="input w-full pr-8 sm:w-auto sm:max-w-[200px]"
+              aria-label={t('filterbar.category')}
+              title={t('filterbar.category')}
             >
               <option value="">{t('filter.allCategories')}</option>
               {meta.categories.map((c) => (
-                <option key={c.id} value={c.id}>{categoryLabel(c.id)} ({c.count})</option>
+                <option key={c.id} value={c.id}>
+                  {categoryLabel(c.id)} ({fmtNum(c.count)})
+                </option>
               ))}
             </select>
             <select
               value={filters.country || ''}
               onChange={(e) => setFilters({ country: e.target.value || null, favoritesOnly: false })}
-              className="h-8 w-full rounded-lg border border-white/[0.06] bg-black/30 px-2 text-[11px] text-ink/70 focus:border-accent/40 focus:outline-none sm:w-auto sm:max-w-[140px]"
-              title="Pays"
+              className="input w-full pr-8 sm:w-auto sm:max-w-[200px]"
+              aria-label={t('filterbar.country')}
+              title={t('filterbar.country')}
             >
-              <option value="">🌐 {t('filter.allCountries')}</option>
+              <option value="">{t('filter.allCountries')}</option>
               {meta.countries.map((c) => (
-                <option key={c.code} value={c.code}>{c.flag} {c.name} ({c.count})</option>
+                <option key={c.code} value={c.code} translate="no">
+                  {c.flag} {countryLabel({ country: c.code, countryName: c.name }, t.lang)} ({fmtNum(c.count)})
+                </option>
               ))}
             </select>
             <select
               value={filters.language || ''}
               onChange={(e) => setFilters({ language: e.target.value || null, favoritesOnly: false })}
-              className="h-8 w-full rounded-lg border border-white/[0.06] bg-black/30 px-2 text-[11px] text-ink/70 focus:border-accent/40 focus:outline-none sm:w-auto sm:max-w-[130px]"
-              title="Langue"
+              className="input w-full pr-8 sm:w-auto sm:max-w-[180px]"
+              aria-label={t('filterbar.language')}
+              title={t('filterbar.language')}
             >
               <option value="">{t('filter.allLanguages')}</option>
               {meta.languages.slice(0, 80).map((l) => (
-                <option key={l.code} value={l.code}>{l.name} ({l.count})</option>
+                <option key={l.code} value={l.code} translate="no">
+                  {languageLabel({ languages: [l.code], languageNames: [l.name] }, t.lang)} ({fmtNum(l.count)})
+                </option>
               ))}
             </select>
           </>
         )}
-        <Toggle active={filters.onlineOnly} onClick={() => setFilters({ onlineOnly: !filters.onlineOnly })} icon={<Wifi size={13} />}>
+        <Toggle active={filters.onlineOnly} onClick={() => setFilters({ onlineOnly: !filters.onlineOnly })}>
           {t('filter.online')}
         </Toggle>
-        <Toggle active={filters.hideGeoBlocked} onClick={() => setFilters({ hideGeoBlocked: !filters.hideGeoBlocked })} icon={<Globe2 size={13} />}>
+        <Toggle active={filters.hideGeoBlocked} onClick={() => setFilters({ hideGeoBlocked: !filters.hideGeoBlocked })}>
           {t('filter.noGeo')}
         </Toggle>
-        <button
-          onClick={() => checkHealth(channels, true)}
-          className="flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.06] px-2.5 text-[11px] text-ink/60 hover:border-accent/30 hover:text-accent"
-          title="Re-vérifier l'état des chaînes"
-        >
-          <RefreshCw size={13} /> <span className="hidden sm:inline">{t('filter.check')}</span>
-        </button>
-
-        <select
-          value={filters.sort}
-          onChange={(e) => setFilters({ sort: e.target.value as 'smart' | 'name' | 'latency' })}
-          className="h-8 rounded-lg border border-white/[0.06] bg-black/30 px-2 text-[11px] text-ink/70 focus:border-accent/40 focus:outline-none"
-          title="Trier"
-        >
-          <option value="smart">{t('filter.sortSmart')}</option>
-          <option value="name">{t('filter.sortName')}</option>
-          <option value="latency">{t('filter.sortLatency')}</option>
-        </select>
-
-        <div className="flex items-center overflow-hidden rounded-lg border border-white/[0.06]">
-          <LayoutGrid size={13} className="ml-2 text-ink/40" />
-          <select
-            value={density}
-            onChange={(e) => setSettings({ density: e.target.value as Density })}
-            className="bg-transparent py-1.5 pl-1.5 pr-2 text-[11px] text-ink/70 focus:outline-none"
-          >
-            <option value="cozy">Large</option>
-            <option value="comfortable">Normal</option>
-            <option value="compact">Dense</option>
-          </select>
-        </div>
+        <span className="flex items-center gap-1">
+          <button type="button" onClick={check} disabled={checking || !channels.length} className="btn btn-quiet px-3">
+            <RefreshCw size={16} aria-hidden="true" />
+            {t('filter.checkAgain')}
+          </button>
+          {(checking || checkedAt) && (
+            <span className="meta">{checking ? t('filterbar.checking') : t('meta.checked', { age: fmtAge(checkedAt as number) })}</span>
+          )}
+        </span>
       </div>
     </div>
   );
 }
 
-function Toggle({
-  active,
-  onClick,
-  icon,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
+// A two-state switch: the word + a check glyph, bone frame when on (never mint).
+function Toggle({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
+      type="button"
+      aria-pressed={active}
       onClick={onClick}
-      className={clsx(
-        'flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] transition-colors',
-        active ? 'border-accent/40 bg-accent/15 text-accent' : 'border-white/[0.06] text-ink/60 hover:text-ink'
-      )}
+      className={clsx('btn btn-secondary px-3.5', active && 'border-[color:var(--t1)] bg-[var(--bg-3)]')}
     >
-      {icon}
-      <span className="hidden sm:inline">{children}</span>
+      <span aria-hidden="true" className={clsx('font-mono', !active && 'text-ink-3')}>
+        {active ? '✓' : '○'}
+      </span>
+      {children}
     </button>
   );
 }

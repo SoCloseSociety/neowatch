@@ -1,8 +1,9 @@
-import { useEffect, useRef, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
+import { Component, useEffect, useRef, lazy, Suspense, type ErrorInfo, type ReactNode } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Filters } from '@/types';
-import { Radio, Lock } from 'lucide-react';
+import { Lock, Compass } from 'lucide-react';
 import { TopBar } from './components/TopBar';
+import { Dock } from './components/Dock';
 import { PromoStrip } from './components/PromoStrip';
 import { FilterBar } from './components/FilterBar';
 import { ChannelGrid } from './components/ChannelGrid';
@@ -11,13 +12,59 @@ import { Install } from './components/Install';
 import { Settings } from './components/Settings';
 import { Login } from './components/Login';
 import { Pricing } from './components/Pricing';
-import { AdBanner } from './components/AdBanner';
 import { ProgramSearch } from './components/ProgramSearch';
 import { Preferences } from './components/Preferences';
 import { Account } from './components/Account';
-import { Spinner } from './components/ui';
+import { Spinner, EmptyState, ToastHost } from './components/ui';
 
-// Lazy-loaded: these pull in hls.js — keep it out of the initial bundle so the
+// A deploy replaces the hashed chunks: a tab opened before it fails to load a
+// lazy page ("Failed to fetch dynamically imported module"). Reload ONCE to get
+// the new index (a flag in sessionStorage stops a reload loop when the server is down).
+const RELOAD_FLAG = 'nw.chunkReload';
+if (typeof window !== 'undefined') {
+  window.addEventListener('vite:preloadError', (e) => {
+    let last = 0;
+    try {
+      last = Number(sessionStorage.getItem(RELOAD_FLAG) || 0);
+    } catch {
+      /* storage blocked: still reload once per page */
+    }
+    if (Date.now() - last < 60_000) return; // already tried: the ErrorBoundary takes over
+    try {
+      sessionStorage.setItem(RELOAD_FLAG, String(Date.now()));
+    } catch {
+      /* storage blocked */
+    }
+    e.preventDefault();
+    window.location.reload();
+  });
+}
+
+/** Anything that throws while rendering lands here instead of a blank screen. */
+class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[neowatch] render error', error, info.componentStack);
+  }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div role="alert" className="flex h-screen flex-col items-center justify-center gap-3 bg-surface px-6 text-center text-ink">
+        <p translate="no" className="brand text-libelle text-ink-2">NEOWATCH</p>
+        <p className="text-carte font-semibold">{tr('shell.crashTitle')}</p>
+        <p className="max-w-sm text-sous text-ink-2">{tr('shell.crashBody')}</p>
+        <button type="button" autoFocus onClick={() => window.location.reload()} className="btn btn-primary mt-2">
+          {tr('shell.reload')}
+        </button>
+      </div>
+    );
+  }
+}
+
+// Lazy-loaded: these pull in hls.js: keep it out of the initial bundle so the
 // channel grid loads fast; the player chunk loads on first play / multi-screen.
 const Player = lazy(() => import('./components/Player').then((m) => ({ default: m.Player })));
 const MultiView = lazy(() => import('./components/MultiView').then((m) => ({ default: m.MultiView })));
@@ -30,12 +77,13 @@ const Radios = lazy(() => import('./components/Radios').then((m) => ({ default: 
 const Legal = lazy(() => import('./components/Legal').then((m) => ({ default: m.Legal })));
 import { useAuth } from './store/authStore';
 import { useCatalog } from './store/catalogStore';
-import { usePlayer } from './store/playerStore';
+import { usePlayer, type PlayOptions } from './store/playerStore';
 import { useUI } from './store/uiStore';
 import { usePrefs } from './store/prefsStore';
 import { applyTheme } from './store/settingsStore';
-import { initSpatialNav } from './lib/spatialNav';
-import { applyLang, useT } from './lib/i18n';
+import { initSpatialNav, bindNavigate, focusAutofocus } from './lib/spatialNav';
+import { isTV } from './lib/device';
+import { applyLang, useT, t as tr } from './lib/i18n';
 
 // Sync the catalog filters <-> the URL query string so a filtered/searched view is
 // shareable and survives reload (e.g. /?q=foot&cat=sports&country=FR). Personal
@@ -80,17 +128,30 @@ function Browse() {
   useFilterUrlSync();
   const play = usePlayer((s) => s.play);
   const addRecent = useCatalog((s) => s.addRecent);
+  const loadChannels = useCatalog((s) => s.loadChannels);
   const f = useCatalog((s) => s.filters);
-  const onPlay = (ch: Parameters<typeof play>[0]) => {
+  const userId = useAuth((s) => s.user?.id ?? null);
+  const premium = useAuth((s) => !!s.user?.premium);
+  // The options carry the row the channel came from: zapping stays inside it.
+  const onPlay = (ch: Parameters<typeof play>[0], opts?: PlayOptions) => {
     addRecent(ch);
-    play(ch);
+    play(ch, opts);
   };
   // Default view = welcoming home (discover). Any filter/search switches to the grid.
   const isHome = !f.category && !f.country && !f.language && !f.q.trim() && !f.foot && !f.favoritesOnly && !f.onlineOnly && !f.hideGeoBlocked;
+  // The grid list loads only when the grid shows (Home has its own rows, TV-11),
+  // and again when the account or Premium changes. A filter change already
+  // started its own load (setFilters): no second request then.
+  const loadedFor = useRef<string | null>(null);
+  const catalogKey = `${userId}|${premium}`;
+  useEffect(() => {
+    if (isHome || loadedFor.current === catalogKey) return;
+    loadedFor.current = catalogKey;
+    if (!useCatalog.getState().loading) loadChannels();
+  }, [isHome, catalogKey, loadChannels]);
   return (
     <main className="flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[1760px]">
-        <AdBanner />
         {isHome ? (
           <Home onPlay={onPlay} />
         ) : (
@@ -110,20 +171,66 @@ function AuthWall() {
   const t = useT();
   useEffect(() => setLogin(true), [setLogin]);
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-accent">
-        <Lock size={24} />
-      </div>
-      <h2 className="font-mono text-lg font-bold tracking-widest text-ink">NEO<span className="text-accent">WATCH</span></h2>
-      <p className="max-w-xs text-sm text-ink/50">{t('gate.body')}</p>
-    </div>
+    <main className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+      <Lock size={28} aria-hidden="true" className="text-ink-3" />
+      <h1 translate="no" className="brand text-libelle text-ink">NEOWATCH</h1>
+      <p className="max-w-xs text-sous text-ink-2">{t('gate.body')}</p>
+      <button type="button" data-autofocus="" onClick={() => setLogin(true)} className="btn btn-primary mt-2">
+        {t('top.login')}
+      </button>
+    </main>
   );
 }
 
-export default function App() {
-  const { init, ready, config, user } = useAuth();
+/** Unknown address: say so, one way back. */
+function NotFound() {
+  const navigate = useNavigate();
+  const t = useT();
+  return (
+    <main className="flex flex-1 items-center justify-center px-6">
+      <EmptyState
+        icon={<Compass size={36} />}
+        title={t('shell.notFoundTitle')}
+        body={t('shell.notFoundBody')}
+        action={{ label: t('empty.backToChannels'), onClick: () => navigate('/', { replace: true }), variant: 'primary' }}
+      />
+    </main>
+  );
+}
+
+/** Gives spatialNav the router (Back from a deep link) and focuses the page's main action on TV. */
+function RouterBridge() {
+  const navigate = useNavigate();
+  const { pathname, search } = useLocation();
+  useEffect(() => {
+    bindNavigate((to, o) => navigate(to, o));
+    return () => bindNavigate(null);
+  }, [navigate]);
+  // A new page on TV: its main action ([data-autofocus]) takes the focus once it renders.
+  useEffect(() => {
+    if (!isTV()) return;
+    const a = document.activeElement;
+    if (a && a !== document.body && document.body.contains(a) && a.closest('main')) (a as HTMLElement).blur();
+    focusAutofocus(4000);
+  }, [pathname]);
+  // Same page, new view (a category tile opens the grid, Back returns Home): the
+  // element that had the focus is gone. Only when nothing holds it (never steal it
+  // from a filter or the search box): the page's main action, else its first card.
+  const lastSearch = useRef(search);
+  useEffect(() => {
+    if (lastSearch.current === search) return; // first render: the effect above owns it
+    lastSearch.current = search;
+    if (!isTV()) return;
+    const a = document.activeElement;
+    if (a && a !== document.body && a !== document.documentElement) return;
+    focusAutofocus(4000, '[data-card]');
+  }, [search]);
+  return null;
+}
+
+function AppShell() {
+  const { init, ready, config, user, authPending } = useAuth();
   const loadMeta = useCatalog((s) => s.loadMeta);
-  const loadChannels = useCatalog((s) => s.loadChannels);
   const current = usePlayer((s) => s.current);
   const multiOpen = usePlayer((s) => s.multiOpen);
 
@@ -160,31 +267,38 @@ export default function App() {
   // Load catalog once we're allowed to (public, or authenticated in SaaS mode).
   // The discover Home is the consistent default; premium prefs (hidden/pinned
   // categories) still apply to the home/grid.
-  const gated = config?.requireAuth && !user;
+  // Keyed on what changes the catalog (the gate, the account, Premium), never on
+  // the user object itself: /auth/me hands a new object on every refresh, and a
+  // favorite or a renewal must not reload the whole catalog (WEB-9).
+  // A held token whose /auth/me has not answered yet (502 during a deploy, an
+  // offline TV) is not "signed out": wait for it instead of showing the wall.
+  const locked = !!config?.requireAuth && !user;
+  const gated = locked && !authPending;
+  const userId = user?.id ?? null;
+  const premium = !!user?.premium;
   useEffect(() => {
-    if (!ready || gated) return;
+    if (!ready || locked) return;
     loadMeta();
-    if (user) usePrefs.getState().load();
+    if (userId) usePrefs.getState().load();
     else usePrefs.getState().reset();
-    loadChannels();
-  }, [ready, gated, user, loadMeta, loadChannels]);
+  }, [ready, locked, userId, premium, loadMeta]);
 
-  if (!ready) {
+  if (!ready || (locked && authPending)) {
     return (
-      <div className="flex h-screen items-center justify-center bg-surface">
-        <div className="flex flex-col items-center gap-3">
-          <Radio className="animate-pulse-live text-accent" size={32} />
-          <Spinner />
-        </div>
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-surface" aria-busy="true">
+        <p translate="no" className="brand text-libelle text-ink-2">NEOWATCH</p>
+        <Spinner />
       </div>
     );
   }
 
   return (
     <BrowserRouter>
+      <RouterBridge />
       <div className="flex h-screen flex-col bg-surface text-ink">
         <TopBar />
         <PromoStrip />
+        <div className="flex min-h-0 flex-1 flex-col pb-[var(--dock-h)] md:pb-0">
         <Routes>
           <Route path="/" element={gated ? <AuthWall /> : <Browse />} />
           <Route
@@ -257,8 +371,10 @@ export default function App() {
               </Suspense>
             }
           />
-          <Route path="*" element={gated ? <AuthWall /> : <Browse />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
+        </div>
+        <Dock />
       </div>
 
       {/* Global overlays (lazy: load hls.js only when first used) */}
@@ -272,6 +388,15 @@ export default function App() {
       <Preferences />
       <Account />
       <Install />
+      <ToastHost />
     </BrowserRouter>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppShell />
+    </ErrorBoundary>
   );
 }

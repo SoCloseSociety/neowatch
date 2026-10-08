@@ -1,37 +1,39 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { clsx } from 'clsx';
-import { Film as FilmIcon, Search, Loader2, Play, Info } from 'lucide-react';
+import { Film as FilmIcon, Search, Play } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Channel } from '@/types';
 import { usePlayer } from '@/store/playerStore';
 import { useCatalog } from '@/store/catalogStore';
+import { toast } from '@/store/uiStore';
 import { useT } from '@/lib/i18n';
+import { AdBanner } from './AdBanner';
+import { EmptyState, Spinner } from './ui';
 
 interface Film { id: string; title: string; year: number | null; description: string; genres: string[]; poster: string }
 
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 
-// Netflix-style public-domain movies (Internet Archive). Posters lazy-load; the
-// playable mp4 is resolved on click (one server call), then played in the Player.
+// Public-domain movies (Internet Archive). Posters lazy-load; the playable file is
+// resolved on click (one server call), then played in the Player.
 export function Films() {
-  const navigate = useNavigate();
   const t = useT();
   const play = usePlayer((s) => s.play);
   const addRecent = useCatalog((s) => s.addRecent);
   const [films, setFilms] = useState<Film[]>([]);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [reload, setReload] = useState(0);
   const [q, setQ] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [failed, setFailed] = useState<Set<string>>(new Set()); // posters that 404'd
 
   useEffect(() => {
     let alive = true;
+    setState('loading');
     api.get<{ films: Film[] }>('/films')
       .then((r) => { if (alive) { setFilms(r.films || []); setState((r.films || []).length ? 'ready' : 'error'); } })
       .catch(() => { if (alive) setState('error'); });
     return () => { alive = false; };
-  }, []);
+  }, [reload]);
 
   const filtered = useMemo(() => {
     const n = norm(q.trim());
@@ -47,67 +49,92 @@ export function Films() {
       const ch: Channel = {
         id: `film:${f.id}`, channelId: null, name: f.title, url: r.url, kind: 'other',
         quality: null, label: null, userAgent: null, referrer: null, logo: f.poster,
-        categories: ['movies'], categoryNames: ['Films'], country: null,
-        countryName: f.year ? String(f.year) : null, flag: '🎬', languages: [], languageNames: [],
+        categories: ['movies'], categoryNames: [t('cat.movies')], country: null,
+        countryName: f.year ? String(f.year) : null, flag: null, languages: [], languageNames: [],
         website: null, nsfw: false, tier: 'free', locked: false, source: 'custom',
         proxyUrl: null, alternates: [], online: true, latency: null,
       };
       addRecent(ch);
       play(ch);
-    } catch { /* unavailable */ } finally { setBusyId(null); }
+    } catch {
+      toast(t('pages.films.playFailed'));
+    } finally {
+      setBusyId(null);
+    }
   };
 
   return (
     <main className="flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-[1760px] px-[clamp(16px,2.6vw,40px)] pb-12 pt-4">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      <div className="mx-auto w-full max-w-[1760px] px-[var(--gouttiere)] pb-12 pt-5">
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="m-0 flex items-center gap-2 text-[clamp(22px,3vw,32px)] font-extrabold tracking-[-0.02em] text-ink"><FilmIcon className="text-accent" size={26} /> {t('films.title')}</h1>
-            <p className="mt-0.5 text-[13px] text-ink-3">{t('films.subtitle')}</p>
+            <h1 className="m-0 flex items-center gap-2.5 text-titre font-semibold text-ink">
+              <FilmIcon className="text-ink-2" size={26} aria-hidden="true" /> {t('films.title')}
+            </h1>
+            <p className="mb-0 mt-1 text-sous text-ink-2">{t('pages.films.subtitle')}</p>
           </div>
-          <div className="relative w-full sm:w-72">
-            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('films.search')} className="h-[38px] w-full rounded-[10px] border border-white/[0.08] bg-white/[0.04] pl-9 pr-3 text-[12.5px] text-ink placeholder:text-ink-3 focus:border-accent/50 focus:outline-none" />
+          <div className="relative w-full sm:w-80">
+            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" aria-hidden="true" />
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={t('films.search')}
+              aria-label={t('films.search')}
+              className="field-input"
+            />
           </div>
         </div>
 
+        <AdBanner />
+
         {state === 'loading' ? (
-          <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-accent" size={30} /></div>
+          <div className="flex items-center justify-center py-20"><Spinner /></div>
         ) : state === 'error' ? (
-          <div className="rounded-2xl border border-white/[0.08] bg-panel/40 px-4 py-16 text-center text-[14px] text-ink-3">{t('films.unavailable')}</div>
+          <EmptyState icon={<FilmIcon size={32} />} title={t('films.unavailable')} body={t('pages.films.errorBody')} action={{ label: t('empty.tryAgain'), onClick: () => setReload((n) => n + 1), variant: 'primary' }} />
         ) : !filtered.length ? (
-          <div className="rounded-2xl border border-white/[0.08] bg-panel/40 px-4 py-16 text-center text-[14px] text-ink-3">{t('films.empty')}</div>
+          <EmptyState icon={<Search size={32} />} title={t('films.empty')} body={t('pages.films.emptyBody')} action={{ label: t('empty.clearSearch'), onClick: () => setQ(''), variant: 'primary' }} />
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 sm:gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-[var(--ecart-cartes)]">
             {filtered.map((f) => (
               <button
                 key={f.id}
+                type="button"
+                data-card=""
+                data-key={`film:${f.id}`}
                 onClick={() => playFilm(f)}
-                title={f.description || f.title}
-                className="lift group relative overflow-hidden rounded-[14px] border border-white/[0.08] bg-panel text-left focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/50"
+                title={f.title}
+                aria-label={f.title}
+                aria-busy={busyId === f.id || undefined}
+                className="lift group relative overflow-hidden rounded-card border border-line bg-card text-left"
               >
-                <div className="relative grid aspect-[2/3] place-items-center overflow-hidden bg-[radial-gradient(120%_90%_at_50%_0%,rgba(124,92,252,.18),rgba(8,11,17,.5))]">
+                <span className="relative grid aspect-[2/3] place-items-center overflow-hidden bg-mini">
                   {failed.has(f.id) ? (
-                    <FilmIcon size={30} className="text-ink-3/50" />
+                    <FilmIcon size={30} className="text-ink-3" aria-hidden="true" />
                   ) : (
                     <img src={f.poster} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" onError={() => setFailed((s) => new Set(s).add(f.id))} />
                   )}
-                  <span className={clsx('absolute inset-0 grid place-items-center bg-black/40 transition-opacity', busyId === f.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100')}>
-                    <span className="grid h-11 w-11 place-items-center rounded-full bg-accent/90 text-[#06151a]">
-                      {busyId === f.id ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} fill="currentColor" className="ml-0.5" />}
+                  <span
+                    aria-hidden="true"
+                    className={
+                      'absolute inset-0 grid place-items-center bg-[rgba(5,7,10,.45)] transition-opacity duration-d1 ' +
+                      (busyId === f.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100')
+                    }
+                  >
+                    <span className="grid h-12 w-12 place-items-center rounded-pill bg-pillbg text-image-ink">
+                      {busyId === f.id ? <Spinner className="h-5 w-5" /> : <Play size={18} fill="currentColor" className="ml-0.5" />}
                     </span>
                   </span>
-                </div>
-                <div className="px-2.5 pb-2.5 pt-2">
-                  <div className="truncate text-[13px] font-bold text-ink">{f.title}</div>
-                  <div className="truncate font-mono text-[11px] text-ink-3">{f.year || f.genres[0] || ''}</div>
-                </div>
+                </span>
+                <span className="block px-3 pb-3 pt-2">
+                  <span className="block truncate text-sous font-semibold text-ink" translate="no">{f.title}</span>
+                  <span className="meta block truncate" translate="no">{f.year || f.genres[0] || ' '}</span>
+                </span>
               </button>
             ))}
           </div>
         )}
-        <p className="mt-6 flex items-center gap-1.5 text-[11px] text-ink-3"><Info size={12} /> {t('films.note')}</p>
-        <button onClick={() => navigate('/')} className="sr-only">NEOWATCH</button>
+        <p className="meta mt-8">{t('films.note')}</p>
       </div>
     </main>
   );

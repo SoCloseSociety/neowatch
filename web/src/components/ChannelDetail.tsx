@@ -1,172 +1,329 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
-import { ArrowLeft, Play, Lock, Plus, Check, Grip, Share2, Radio, Loader2 } from 'lucide-react';
-import { api } from '@/lib/api';
-import { fetchNowNext, fmtTime, type NowNext } from '@/lib/epg';
+import { ArrowLeft, Play, Lock, Plus, Check, Grip, Share2, Flag, Radio } from 'lucide-react';
+import { api, ApiError } from '@/lib/api';
+import { fetchNowNext, type NowNext } from '@/lib/epg';
+import { categoryLabel } from '@/lib/format';
 import type { Channel } from '@/types';
 import { usePlayer } from '@/store/playerStore';
 import { useCatalog } from '@/store/catalogStore';
-import { useUI } from '@/store/uiStore';
-import { useT } from '@/lib/i18n';
+import { useUI, toast } from '@/store/uiStore';
+import { useT, fmtTime, fmtAge } from '@/lib/i18n';
+import { Button, Data, EmptyState, HealthPill, Meta, Overline, Pill, Spinner, btnClass } from './ui';
+import { LEGAL_CONTACT } from './Legal';
+import { countryLabel, languageLabel } from './ChannelCard';
+import { isTV } from '@/lib/device';
 
 interface Programme { start: number; stop: number | null; title: string; desc?: string | null }
+
+const MULTI_MAX = 9;
+
+// Ambiance art per category, the same map as the home hero (spec 2.2). Any other
+// category: no picture (the logo frame carries the page), never the stadium.
+const AMBIANCE: Record<string, string> = {
+  sports: 'sport', foot: 'sport',
+  movies: 'cinema', series: 'cinema', animation: 'cinema', classic: 'cinema',
+  music: 'music',
+  news: 'news', business: 'news', weather: 'news', legislative: 'news', documentary: 'news',
+};
+
+/** Back that never leaves the app: history inside NEOWATCH, else the home. */
+export function useSmartBack() {
+  const navigate = useNavigate();
+  return () => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) navigate(-1);
+    else navigate('/');
+  };
+}
+
+/** Rewrite the address bar without a navigation (react-router keeps its own state). */
+function replaceUrl(path: string) {
+  try {
+    window.history.replaceState(window.history.state, '', path);
+  } catch {
+    /* sandboxed */
+  }
+}
 
 export function ChannelDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const back = useSmartBack();
+  const tv = isTV();
   const t = useT();
   const play = usePlayer((s) => s.play);
   const addRecent = useCatalog((s) => s.addRecent);
   const addToMulti = usePlayer((s) => s.addToMulti);
+  const multiCount = usePlayer((s) => s.multi.length);
   const isInMulti = usePlayer((s) => s.isInMulti);
   const toggleFavorite = useCatalog((s) => s.toggleFavorite);
-  const isFavorite = useCatalog((s) => s.isFavorite);
+  const favorite = useCatalog((s) => s.favorites);
   const setPricing = useUI((s) => s.setPricing);
 
   const [ch, setCh] = useState<Channel | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState<'loading' | 'ready' | 'gone' | 'error'>('loading');
   const [epg, setEpg] = useState<NowNext | null>(null);
   const [day, setDay] = useState<Programme[]>([]);
   const [similar, setSimilar] = useState<Channel[]>([]);
-  const [shared, setShared] = useState(false);
+  const [reload, setReload] = useState(0);
+  const watchRef = useRef<HTMLButtonElement>(null);
+  const autoplayed = useRef(false);
 
   useEffect(() => {
     let alive = true;
-    setLoading(true); setCh(null); setEpg(null); setDay([]); setSimilar([]);
-    window.scrollTo?.(0, 0);
+    const prevTitle = document.title;
+    setState('loading'); setCh(null); setEpg(null); setDay([]); setSimilar([]);
     document.querySelector('main')?.scrollTo({ top: 0 });
-    api.get<Channel>(`/catalog/channel/${id}`).then((c) => {
+    api.get<Channel>(`/catalog/channel/${encodeURIComponent(id || '')}`).then((c) => {
       if (!alive) return;
-      setCh(c); setLoading(false);
-      document.title = `${c.name} -- NEOWATCH`; // nicer tab title + share/PWA label
+      setCh(c);
+      setState('ready');
+      document.title = t('detail.docTitle', { name: c.name });
+      // An old id resolved through an alias: show the current address (no reload).
+      const params = new URLSearchParams(window.location.search);
+      const wantsPlay = params.get('play') === '1';
+      params.delete('play');
+      const qs = params.toString();
+      const canonical = c.canonicalId && c.canonicalId !== id ? c.canonicalId : id;
+      if (canonical !== id || wantsPlay) replaceUrl(`/chaine/${canonical}${qs ? `?${qs}` : ''}`);
+      // ?play=1 (Sentinel, shared links): start once, always muted (a page that
+      // starts with sound is refused by the browser anyway).
+      if (wantsPlay && !c.locked && !autoplayed.current) {
+        autoplayed.current = true;
+        addRecent(c);
+        play(c, { muted: true });
+      }
       if (c.channelId) {
         fetchNowNext([c.channelId]).then((m) => alive && setEpg(m[c.channelId!] || null));
         api.get<{ programmes: Programme[] }>(`/epg/day?id=${encodeURIComponent(c.channelId)}`).then((r) => alive && setDay(r.programmes || [])).catch(() => {});
       }
       // Similar: same category (fallback country), excluding self.
       const cat = c.categories?.[0];
-      const qs = cat && cat !== 'undefined' ? `category=${cat}` : c.country ? `country=${c.country}` : '';
-      if (qs) api.get<{ items: Channel[] }>(`/catalog/channels?${qs}&limit=18`).then((r) => alive && setSimilar((r.items || []).filter((x) => x.id !== c.id).slice(0, 14))).catch(() => {});
-    }).catch(() => { if (alive) { setLoading(false); } });
-    return () => { alive = false; document.title = 'NEOWATCH -- Toutes les chaînes en direct'; };
-  }, [id]);
+      const q = cat && cat !== 'undefined' ? `category=${encodeURIComponent(cat)}` : c.country ? `country=${encodeURIComponent(c.country)}` : '';
+      if (q) api.get<{ items: Channel[] }>(`/catalog/channels?${q}&limit=18`).then((r) => alive && setSimilar((r.items || []).filter((x) => x.url !== c.url).slice(0, 14))).catch(() => {});
+    }).catch((e) => {
+      if (alive) setState(e instanceof ApiError && e.status === 404 ? 'gone' : 'error');
+    });
+    return () => { alive = false; document.title = prevTitle; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, reload]);
 
-  const start = (c: Channel) => { if (c.locked) return setPricing(true); addRecent(c); play(c); };
-  const share = async () => {
-    const url = `${location.origin}/chaine/${ch?.id}`;
-    try {
-      if (navigator.share) await navigator.share({ title: ch?.name, url });
-      else { await navigator.clipboard?.writeText(url); setShared(true); setTimeout(() => setShared(false), 1500); }
-    } catch { /* cancelled */ }
-  };
+  // The remote lands on "Watch now" (spec: one primary, focused on arrival).
+  useEffect(() => {
+    if (state === 'ready') watchRef.current?.focus({ preventScroll: true });
+  }, [state]);
 
-  if (loading) return <div className="flex flex-1 items-center justify-center"><Loader2 className="animate-spin text-accent" size={32} /></div>;
-  if (!ch) return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 text-ink/50">
-      <p>{t('detail.notFound')}</p>
-      <button onClick={() => navigate('/')} className="rounded-lg border border-white/10 px-4 py-2 text-sm hover:text-accent">{t('detail.back')}</button>
-    </div>
-  );
+  if (state === 'loading') {
+    return <main className="flex flex-1 items-center justify-center"><Spinner /></main>;
+  }
+  if (!ch) {
+    return (
+      <main className="flex flex-1 items-center justify-center px-4">
+        {state === 'gone' ? (
+          <EmptyState icon={<Radio size={32} />} title={t('detail.notFound')} body={t('pages.detail.goneBody')} action={{ label: t('empty.backToChannels'), onClick: () => navigate('/'), variant: 'primary' }} />
+        ) : (
+          <EmptyState icon={<Radio size={32} />} title={t('pages.detail.errorTitle')} body={t('pages.detail.errorBody')} action={{ label: t('empty.tryAgain'), onClick: () => setReload((n) => n + 1), variant: 'primary' }} />
+        )}
+      </main>
+    );
+  }
 
-  const online = ch.online === true;
-  const meta = [ch.countryName, ch.languageNames?.[0], ch.categoryNames?.[0], ch.quality].filter(Boolean);
+  const isFav = favorite.some((f) => f.url === ch.url);
+  const inMulti = isInMulti(ch.url);
+  const cat = ch.categories?.find((c) => c && c !== 'undefined') || null;
+  const ambCat = ch.categories?.find((c) => AMBIANCE[c]);
+  const art = ambCat ? `url(/ambiance/${AMBIANCE[ambCat]}.webp)` : 'linear-gradient(var(--fond-image), var(--fond-image))';
   const now = epg?.now;
+  const next = epg?.next;
   const progress = now && now.stop ? Math.min(100, Math.max(0, ((Date.now() - now.start) / (now.stop - now.start)) * 100)) : null;
+  const country = countryLabel(ch, t.lang);
+  const language = languageLabel(ch, t.lang);
+  const checked = ch.checkedAt ? t('meta.checked', { age: fmtAge(ch.checkedAt) }) : t('meta.notChecked');
+  const pageUrl = `${location.origin}/chaine/${ch.canonicalId || ch.id}`;
+
+  const start = () => {
+    if (ch.locked) return setPricing(true);
+    addRecent(ch);
+    play(ch, { queue: [ch, ...similar], originKey: ch.url });
+  };
+  const toggleList = () => {
+    toggleFavorite(ch);
+    toast(t(isFav ? 'toast.removedList' : 'toast.addedList'), { undo: () => toggleFavorite(ch) });
+  };
+  const multi = () => {
+    if (!inMulti && multiCount < MULTI_MAX) toast(t('toast.addedMulti', { n: multiCount + 1, max: MULTI_MAX }), { ok: true });
+    addToMulti(ch);
+  };
+  const share = async () => {
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: ch.name, url: pageUrl });
+        return;
+      }
+      await navigator.clipboard?.writeText(pageUrl);
+      toast(t('toast.copied'), { ok: true });
+    } catch {
+      /* cancelled */
+    }
+  };
+  const reportHref = `mailto:${LEGAL_CONTACT}?subject=${encodeURIComponent(t('pages.detail.reportSubject', { name: ch.name }))}&body=${encodeURIComponent(t('pages.detail.reportBody', { name: ch.name, url: ch.url, page: pageUrl }))}`;
 
   return (
-    <div className="mx-auto w-full max-w-[1760px] pb-12">
-      {/* Hero header */}
-      <div className="relative overflow-hidden">
-        <div className="animate-kenburns absolute inset-0 bg-cover bg-center opacity-40" style={{ backgroundImage: 'url(/hero.webp)' }} />
-        <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/85 to-surface/40" />
-        <div className="relative flex flex-col gap-5 px-[clamp(16px,2.6vw,40px)] pb-7 pt-5">
-          <button onClick={() => navigate(-1)} className="flex w-fit items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[12px] text-ink-2 hover:border-accent hover:text-accent">
-            <ArrowLeft size={14} /> {t('detail.back')}
-          </button>
-          <div className="flex flex-wrap items-end gap-5">
-            <div className="grid h-28 w-44 shrink-0 place-items-center overflow-hidden rounded-2xl border border-white/[0.08] bg-gradient-to-br from-white/[0.06] to-black/40">
-              {ch.logo ? <img src={ch.logo} alt="" referrerPolicy="no-referrer" className="max-h-[70%] max-w-[80%] object-contain" /> : <Radio className="text-ink/30" size={40} />}
+    <main className="flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-[1760px] pb-12">
+        {/* Hero (spec 2.2): picture, scrim, one primary */}
+        {/* The picture and its scrim stay dark in both styles (spec): the primary
+            keeps a light fill here so it reads on the image in Doux too. */}
+        <section
+          data-hero=""
+          className="relative overflow-hidden bg-cover bg-center"
+          style={{
+            backgroundImage: `var(--voile-hero), ${art}`,
+            ['--primaire-fond' as string]: 'var(--encre-image)',
+            ['--primaire-encre' as string]: '#0a0d10',
+          }}
+        >
+          <div className="relative flex flex-col gap-6 px-[var(--gouttiere)] pb-8 pt-5">
+            <button type="button" onClick={back} className={btnClass('quiet', { className: 'w-fit px-3 text-on-image' })} aria-label={t('detail.back')}>
+              <ArrowLeft size={16} aria-hidden="true" /> {t('detail.back')}
+            </button>
+            <div className="flex flex-wrap items-end gap-6">
+              <div className="grid h-20 w-32 shrink-0 sm:h-28 sm:w-44 place-items-center overflow-hidden rounded-card border border-line bg-card" aria-hidden="true">
+                {ch.logo ? <img src={ch.logo} alt="" referrerPolicy="no-referrer" className="max-h-[70%] max-w-[80%] object-contain" /> : <Radio className="text-ink-3" size={40} />}
+              </div>
+              <div className="flex min-w-0 flex-1 basis-[320px] flex-col gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {ch.locked ? (
+                    <Pill><Lock size={12} aria-hidden="true" /> {t('pill.premium')}</Pill>
+                  ) : ch.online === true ? (
+                    <HealthPill status="online" />
+                  ) : ch.online === false ? (
+                    <HealthPill status="offline" />
+                  ) : null}
+                  {cat && <Overline className="text-on-image">{categoryLabel(cat)}</Overline>}
+                </div>
+                <h1 className="m-0 text-titre font-semibold text-on-image" translate="no">{ch.name}</h1>
+                <Meta
+                  className="text-on-image"
+                  parts={[
+                    country ? <Data>{`${ch.flag ? `${ch.flag} ` : ''}${country}`}</Data> : null,
+                    language ? <Data>{language}</Data> : null,
+                    ch.quality ? <Data>{ch.quality}</Data> : null,
+                    checked,
+                  ]}
+                />
+                {now && (
+                  <p className="m-0 max-w-[620px] text-corps text-on-image">
+                    {now.stop ? t('hero.until', { title: now.title, time: fmtTime(now.stop) }) : <Data>{now.title}</Data>}
+                  </p>
+                )}
+                <div className="mt-1 flex flex-wrap items-center gap-2.5">
+                  <button
+                    ref={watchRef}
+                    type="button"
+                    data-autofocus=""
+                    data-key={ch.url}
+                    onClick={start}
+                    className={btnClass('primary', { className: 'px-6' })}
+                    aria-label={ch.locked ? t('promo.discover') : t('home.watch')}
+                  >
+                    {ch.locked ? <Lock size={18} aria-hidden="true" /> : <Play size={18} fill="currentColor" aria-hidden="true" />}
+                    {ch.locked ? t('promo.discover') : t('home.watch')}
+                  </button>
+                  <Button
+                    onClick={toggleList}
+                    aria-pressed={isFav}
+                    icon={isFav ? <Check size={17} aria-hidden="true" /> : <Plus size={17} aria-hidden="true" />}
+                    aria-label={isFav ? t('home.inMyList') : t('home.myList')}
+                  >
+                    {isFav ? t('home.inMyList') : t('home.myList')}
+                  </Button>
+                  {!ch.locked && (
+                    <Button variant="quiet" onClick={multi} aria-pressed={inMulti} icon={<Grip size={16} aria-hidden="true" />} aria-label={t('nav.multi')} className="text-on-image">
+                      {t('nav.multi')}
+                    </Button>
+                  )}
+                  <Button variant="quiet" onClick={share} icon={<Share2 size={16} aria-hidden="true" />} aria-label={t('detail.share')} className="text-on-image">
+                    {t('detail.share')}
+                  </Button>
+                  {!tv && <a href={reportHref} className={btnClass('quiet', { className: 'text-on-image' })} aria-label={t('pages.detail.report')} title={t('pages.detail.report')}>
+                    <Flag size={16} aria-hidden="true" /> {t('pages.detail.report')}
+                  </a>}
+                </div>
+              </div>
             </div>
-            <div className="flex flex-1 flex-col gap-2.5">
-              <div className="flex items-center gap-2.5">
-                {ch.locked ? (
-                  <span className="inline-flex items-center gap-1 rounded-[5px] bg-gold/[0.16] px-2 py-1 font-mono text-[10px] font-bold text-gold"><Lock size={11} /> {t('common.premium')}</span>
-                ) : online ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-live px-2 py-1 font-mono text-[10px] font-bold tracking-wider text-white"><span className="h-[6px] w-[6px] animate-pulse-red rounded-full bg-white" /> LIVE</span>
-                ) : null}
-                <span className="text-[28px]">{ch.flag || '🌐'}</span>
+          </div>
+        </section>
+
+        {/* Today's guide */}
+        <section className="px-[var(--gouttiere)]">
+          <h2 className="row-title mb-3 mt-6">{t('detail.programme')}</h2>
+          {now && (
+            <div className="mb-4 rounded-card border border-line bg-card p-4">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <Pill tone="live">{t('pill.onNow')}</Pill>
+                <span className="meta">{fmtTime(now.start)}{now.stop ? ` · ${fmtTime(now.stop)}` : ''}</span>
               </div>
-              <h1 className="m-0 text-[clamp(26px,4vw,44px)] font-extrabold leading-tight tracking-[-0.02em] text-ink">{ch.name}</h1>
-              <div className="flex flex-wrap items-center gap-2 text-[12px] text-ink-2">
-                {meta.map((m, i) => <span key={i} className="rounded-md border border-white/[0.08] px-2 py-1">{m}</span>)}
-              </div>
-              {/* Actions */}
-              <div className="mt-1 flex flex-wrap items-center gap-2.5">
-                <button onClick={() => start(ch)} className="flex h-12 items-center gap-2.5 rounded-[11px] bg-accent px-6 text-[15px] font-extrabold text-[#06151a] shadow-[0_12px_30px_-10px_rgba(34,211,238,.55)] hover:brightness-110">
-                  {ch.locked ? <Lock size={18} /> : <Play size={18} fill="currentColor" />} {ch.locked ? t('common.premium') : t('home.watch')}
+              <p className="mb-0 mt-2 text-carte font-semibold text-ink" translate="no">{now.title}</p>
+              {now.desc && <p className="mb-0 mt-1 max-w-[760px] text-sous text-ink-2" translate="no">{now.desc}</p>}
+              {progress != null && (
+                <div className="mt-3 h-1 overflow-hidden rounded-pill bg-[var(--bg-3)]" aria-hidden="true">
+                  <div className="h-full rounded-pill bg-ink-2" style={{ width: `${progress}%` }} />
+                </div>
+              )}
+              {next && <p className="meta mb-0 mt-2">{t('card.nextAt', { time: fmtTime(next.start), title: next.title })}</p>}
+            </div>
+          )}
+          {day.length > 0 ? (
+            <ol className="m-0 list-none divide-y divide-[var(--line-soft)] overflow-hidden rounded-card border border-line bg-card p-0">
+              {day.map((p, i) => {
+                const isNow = !!now && p.start === now.start;
+                return (
+                  <li key={i} className={clsx('flex items-start gap-4 px-4 py-2.5', isNow && 'bg-[var(--bg-3)]')}>
+                    <span className="meta w-14 shrink-0">{fmtTime(p.start)}</span>
+                    <span className={clsx('text-sous', isNow ? 'font-semibold text-ink' : 'text-ink-2')} translate="no">{p.title}</span>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : !now ? (
+            <p className="m-0 rounded-card border border-line bg-card px-4 py-5 text-sous text-ink-2">{t('detail.noProgramme')}</p>
+          ) : null}
+        </section>
+
+        {/* Similar channels: one card, one action */}
+        {similar.length > 0 && (
+          <section className="row mt-8">
+            <h2 className="row-title mb-0 px-[var(--gouttiere)]">{t('detail.similar')}</h2>
+            <div className="row-track">
+              {similar.map((s) => (
+                <button
+                  key={s.url}
+                  type="button"
+                  data-card=""
+                  data-key={s.url}
+                  onClick={() => navigate(`/chaine/${s.id}`)}
+                  className="lift w-[200px] shrink-0 overflow-hidden rounded-card border border-line bg-card text-left"
+                  aria-label={s.name}
+                >
+                  {/* Positioned plate: the logo's % caps resolve against the 16:9 box, so a
+                      tall logo can never stretch one card above its row. */}
+                  <span className="relative block aspect-video bg-mini" aria-hidden="true">
+                    {s.logo ? (
+                      <img src={s.logo} alt="" loading="lazy" referrerPolicy="no-referrer" className="absolute inset-0 m-auto max-h-[60%] max-w-[72%] object-contain" />
+                    ) : (
+                      <Radio className="absolute inset-0 m-auto text-ink-3" />
+                    )}
+                  </span>
+                  <span className="block truncate px-3 py-2 text-sous font-semibold text-ink" translate="no">{s.name}</span>
                 </button>
-                <Action onClick={() => toggleFavorite(ch)} active={isFavorite(ch.url)} icon={isFavorite(ch.url) ? <Check size={17} /> : <Plus size={17} />} label={isFavorite(ch.url) ? t('home.inMyList') : t('home.myList')} />
-                {!ch.locked && <Action onClick={() => addToMulti(ch)} active={isInMulti(ch.url)} icon={<Grip size={16} />} label={t('top.multi')} />}
-                <Action onClick={share} icon={shared ? <Check size={16} className="text-emerald-400" /> : <Share2 size={16} />} label={t('detail.share')} />
-              </div>
+              ))}
             </div>
-          </div>
-        </div>
+          </section>
+        )}
       </div>
-
-      {/* Programme (EPG) */}
-      <div className="px-[clamp(16px,2.6vw,40px)]">
-        <h2 className="mb-3 mt-4 text-[18px] font-bold text-ink">{t('detail.programme')}</h2>
-        {now ? (
-          <div className="mb-4 rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
-            <div className="flex items-center gap-2.5 font-mono text-[11px]"><span className="font-bold text-accent">{t('detail.onNow')}</span><span className="text-ink-3">{fmtTime(now.start)}{now.stop ? `–${fmtTime(now.stop)}` : ''}</span></div>
-            <div className="mt-1 text-[15px] font-semibold text-ink">{now.title}</div>
-            {now.desc && <p className="mt-1 text-[12px] leading-relaxed text-ink-2">{now.desc}</p>}
-            {progress != null && <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-gradient-to-r from-accent to-[#7C5CFC]" style={{ width: `${progress}%` }} /></div>}
-          </div>
-        ) : null}
-        {day.length > 0 ? (
-          <div className="divide-y divide-white/[0.05] overflow-hidden rounded-2xl border border-white/[0.08] bg-panel/40">
-            {day.map((p, i) => {
-              const isNow = now && p.start === now.start;
-              return (
-                <div key={i} className={clsx('flex items-start gap-4 px-4 py-2.5', isNow && 'bg-accent/[0.06]')}>
-                  <span className="w-14 shrink-0 font-mono text-[12px] text-accent">{fmtTime(p.start)}</span>
-                  <span className={clsx('text-[13px]', isNow ? 'font-semibold text-ink' : 'text-ink-2')}>{p.title}</span>
-                </div>
-              );
-            })}
-          </div>
-        ) : !now ? (
-          <div className="rounded-2xl border border-white/[0.08] bg-panel/40 px-4 py-6 text-center text-[13px] text-ink-3">{t('detail.noProgramme')}</div>
-        ) : null}
-      </div>
-
-      {/* Similar channels */}
-      {similar.length > 0 && (
-        <div className="mt-7 px-[clamp(16px,2.6vw,40px)]">
-          <h2 className="mb-3 text-[18px] font-bold text-ink">{t('detail.similar')}</h2>
-          <div className="nw-scroll flex gap-4 overflow-x-auto pb-2">
-            {similar.map((s) => (
-              <button key={s.url} onClick={() => navigate(`/chaine/${s.id}`)} className="lift group w-[180px] shrink-0 overflow-hidden rounded-[14px] border border-white/[0.08] bg-panel text-left">
-                <div className="grid aspect-video place-items-center bg-[radial-gradient(120%_120%_at_50%_0%,rgba(255,255,255,.06),rgba(8,11,17,.4))]">
-                  {s.logo ? <img src={s.logo} alt="" loading="lazy" referrerPolicy="no-referrer" className="max-h-[60%] max-w-[72%] object-contain" /> : <Radio className="text-ink/30" />}
-                </div>
-                <div className="truncate px-3 py-2 text-[13px] font-semibold text-ink">{s.name}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Action({ onClick, icon, label, active }: { onClick: () => void; icon: React.ReactNode; label: string; active?: boolean }) {
-  return (
-    <button onClick={onClick} className={clsx('flex h-12 items-center gap-2 rounded-[11px] border px-4 text-[13px] font-bold', active ? 'border-accent/40 bg-accent/[0.12] text-accent' : 'border-white/[0.08] bg-white/[0.06] text-ink hover:bg-white/[0.12]')}>
-      {icon} <span className="hidden sm:inline">{label}</span>
-    </button>
+    </main>
   );
 }

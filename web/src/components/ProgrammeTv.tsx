@@ -1,125 +1,202 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { clsx } from 'clsx';
-import { ArrowLeft, Radio, Loader2, CalendarClock } from 'lucide-react';
+import { ArrowLeft, Radio, CalendarClock } from 'lucide-react';
 import { api } from '@/lib/api';
-import { fmtTime } from '@/lib/epg';
+import { categoryLabel } from '@/lib/format';
+import type { Channel } from '@/types';
 import { useCatalog } from '@/store/catalogStore';
-import { useT } from '@/lib/i18n';
+import { usePlayer } from '@/store/playerStore';
+import { useUI } from '@/store/uiStore';
+import { useT, fmtTime } from '@/lib/i18n';
+import { EmptyState, Spinner, btnClass } from './ui';
+import { countryLabel } from './ChannelCard';
 
 interface GP { start: number; stop: number | null; title: string }
-interface GC { id: number; name: string; logo: string | null; flag: string | null; channelId: string; locked: boolean; programmes: GP[] }
+interface GC { id: string; name: string; logo: string | null; flag: string | null; channelId: string; locked: boolean; programmes: GP[] }
 
 const PX_PER_MIN = 5;   // 1h = 300px
-const LABEL_W = 168;
-const ROW_H = 56;
+const LABEL_W = 180;
+const ROW_H = 60;
 const HOURS = 14;       // visible window length (scrollable)
+const MIN_W = 24;       // narrower blocks are not drawn (no readable text fits)
 
-// Netflix/Molotov-style 24h EPG grid: channels (rows) x time (columns), aligned to a
-// shared time scale, with a "now" marker. Click any cell -> the channel detail page.
+interface Block { p: GP; left: number; width: number; end: number }
+
+// Lay one channel's programmes on the time axis. Feeds overlap (two sources, a late
+// stop): sort by start and clamp each block so it starts where the previous ends.
+function layout(programmes: GP[], xOf: (ms: number) => number, gridW: number): Block[] {
+  const out: Block[] = [];
+  let edge = 0;
+  for (const p of [...programmes].sort((a, b) => a.start - b.start)) {
+    const end = p.stop && p.stop > p.start ? p.stop : p.start + 3600000;
+    const left = Math.max(0, xOf(p.start), edge);
+    const right = Math.min(gridW, xOf(end));
+    if (right - left < MIN_W) continue;
+    out.push({ p, left, width: right - left - 2, end });
+    edge = right;
+  }
+  return out;
+}
+
+// 24h guide grid: channels (rows) x time (columns) with a "now" line. OK on the
+// programme that is on now plays the channel; any other block opens its page.
 export function ProgrammeTv() {
   const navigate = useNavigate();
   const t = useT();
   const meta = useCatalog((s) => s.meta);
+  const addRecent = useCatalog((s) => s.addRecent);
+  const play = usePlayer((s) => s.play);
+  const setPricing = useUI((s) => s.setPricing);
   const [params, setParams] = useSearchParams();
   const country = params.get('country') ?? 'FR';
   const category = params.get('category') ?? '';
   const [channels, setChannels] = useState<GC[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [enabled, setEnabled] = useState(true);
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [reload, setReload] = useState(0);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const back = () => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) navigate(-1);
+    else navigate('/');
+  };
 
   const setFilter = (key: string, val: string) => {
     const next = new URLSearchParams(params);
-    if (val) next.set(key, val); else next.delete(key);
+    // "All countries" is an explicit choice (empty value), not the FR default.
+    if (key === 'country') next.set(key, val);
+    else if (val) next.set(key, val);
+    else next.delete(key);
     setParams(next, { replace: true });
   };
 
   useEffect(() => {
-    let alive = true; setLoading(true);
+    let alive = true;
+    setState('loading');
     const qs = new URLSearchParams();
     if (country) qs.set('country', country);
     if (category) qs.set('category', category);
-    api.get<{ channels: GC[] }>(`/epg/grid?${qs.toString()}`)
-      .then((r) => { if (alive) { setChannels(r.channels || []); setLoading(false); } })
-      .catch(() => { if (alive) { setChannels([]); setLoading(false); } });
+    api.get<{ channels: GC[]; enabled?: boolean }>(`/epg/grid?${qs.toString()}`)
+      .then((r) => { if (alive) { setChannels(r.channels || []); setEnabled(r.enabled !== false); setState('ready'); } })
+      .catch(() => { if (alive) { setChannels([]); setState('error'); } });
     return () => { alive = false; };
-  }, [country, category]);
+  }, [country, category, reload]);
 
   const now = Date.now();
   const windowStart = useMemo(() => { const d = new Date(); d.setMinutes(0, 0, 0); return d.getTime() - 3600000; }, []);
   const gridW = HOURS * 60 * PX_PER_MIN;
   const xOf = (ms: number) => ((ms - windowStart) / 60000) * PX_PER_MIN;
-  const hourMarks = Array.from({ length: HOURS + 1 }, (_, i) => windowStart + i * 3600000);
+  const hourMarks = Array.from({ length: HOURS }, (_, i) => windowStart + i * 3600000);
   const nowX = xOf(now);
+
+  // The grid carries a short projection: fetch the playable channel, then play it.
+  const playChannel = async (g: GC) => {
+    if (g.locked) return setPricing(true);
+    if (busy) return;
+    setBusy(g.id);
+    try {
+      const c = await api.get<Channel>(`/catalog/channel/${encodeURIComponent(g.id)}?channelId=${encodeURIComponent(g.channelId)}`);
+      if (c.locked) setPricing(true);
+      else { addRecent(c); play(c); }
+    } catch {
+      navigate(`/chaine/${g.id}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const countries = meta?.countries || [];
+  const categories = meta?.categories.filter((c) => c.id !== 'undefined') || [];
 
   return (
     <main className="flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-[1760px] px-[clamp(16px,2.6vw,40px)] pb-12 pt-4">
-        {/* Header + filters */}
-        <button onClick={() => navigate('/')} className="mb-3 flex w-fit items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[12px] text-ink-2 hover:border-accent hover:text-accent">
-          <ArrowLeft size={14} /> {t('detail.back')}
+      <div className="mx-auto w-full max-w-[1760px] px-[var(--gouttiere)] pb-12 pt-4">
+        <button type="button" onClick={back} className={btnClass('quiet', { className: 'mb-3 px-3' })} aria-label={t('detail.back')}>
+          <ArrowLeft size={16} aria-hidden="true" /> {t('detail.back')}
         </button>
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="m-0 flex items-center gap-2 text-[clamp(22px,3vw,32px)] font-extrabold tracking-[-0.02em] text-ink"><CalendarClock className="text-accent" size={26} /> {t('programme.title')}</h1>
-            <p className="mt-0.5 text-[13px] text-ink-3">{t('programme.subtitle')}</p>
+            <h1 className="m-0 flex items-center gap-2.5 text-titre font-semibold text-ink">
+              <CalendarClock className="text-ink-2" size={26} aria-hidden="true" /> {t('programme.title')}
+            </h1>
+            <p className="mb-0 mt-1 text-sous text-ink-2">{t('pages.guide.subtitle')}</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <select value={country} onChange={(e) => setFilter('country', e.target.value)} className="input w-full sm:w-auto">
+          {enabled && <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+            <label className="sr-only" htmlFor="guide-country">{t('pages.guide.country')}</label>
+            <select id="guide-country" value={country} onChange={(e) => setFilter('country', e.target.value)} className="input w-full sm:w-56">
               <option value="">{t('programme.allCountries')}</option>
-              {meta?.countries.slice(0, 100).map((c) => <option key={c.code} value={c.code}>{c.flag} {c.name}</option>)}
+              {countries.map((c) => <option key={c.code} value={c.code} translate="no">{c.flag} {countryLabel({ country: c.code, countryName: c.name }, t.lang)}</option>)}
             </select>
-            <select value={category} onChange={(e) => setFilter('category', e.target.value)} className="input w-full sm:w-auto">
+            <label className="sr-only" htmlFor="guide-category">{t('pages.guide.category')}</label>
+            <select id="guide-category" value={category} onChange={(e) => setFilter('category', e.target.value)} className="input w-full sm:w-52">
               <option value="">{t('programme.allCategories')}</option>
-              {meta?.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {categories.map((c) => <option key={c.id} value={c.id}>{categoryLabel(c.id)}</option>)}
             </select>
-          </div>
+          </div>}
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-accent" size={30} /></div>
+        {state === 'loading' ? (
+          <div className="flex items-center justify-center py-20"><Spinner /></div>
+        ) : state === 'error' ? (
+          <EmptyState icon={<CalendarClock size={32} />} title={t('pages.guide.errorTitle')} body={t('pages.guide.errorBody')} action={{ label: t('empty.tryAgain'), onClick: () => setReload((n) => n + 1), variant: 'primary' }} />
         ) : !channels.length ? (
-          <div className="rounded-2xl border border-white/[0.08] bg-panel/40 px-4 py-16 text-center text-[14px] text-ink-3">{t('programme.empty')}</div>
+          !enabled ? (
+            <EmptyState icon={<CalendarClock size={32} />} title={t('pages.guide.offTitle')} body={t('pages.guide.offBody')} action={{ label: t('empty.browseChannels'), onClick: () => navigate('/'), variant: 'primary' }} />
+          ) : country ? (
+            <EmptyState icon={<CalendarClock size={32} />} title={t('programme.empty')} body={t('pages.guide.emptyBody')} action={{ label: t('empty.allCountries'), onClick: () => setFilter('country', ''), variant: 'primary' }} />
+          ) : (
+            <EmptyState icon={<CalendarClock size={32} />} title={t('pages.guide.emptyAllTitle')} body={t('pages.guide.emptyBody')} action={{ label: t('empty.browseChannels'), onClick: () => navigate('/'), variant: 'primary' }} />
+          )
         ) : (
-          <div className="nw-scroll overflow-x-auto rounded-2xl border border-white/[0.06] bg-panel/30">
+          <div className="nw-thin overflow-x-auto rounded-card border border-line bg-card">
             <div className="relative" style={{ width: LABEL_W + gridW }}>
               {/* Time header */}
-              <div className="sticky top-0 z-20 flex h-7 border-b border-white/[0.08] bg-surface/95 backdrop-blur">
-                <div className="sticky left-0 z-10 shrink-0 bg-surface/95" style={{ width: LABEL_W }} />
+              <div className="sticky top-0 z-20 flex h-9 border-b border-line bg-[var(--bg-1)]">
+                <div className="sticky left-0 z-10 shrink-0 border-r border-line bg-[var(--bg-1)]" style={{ width: LABEL_W }} />
                 <div className="relative" style={{ width: gridW }}>
                   {hourMarks.map((h) => (
-                    <span key={h} className="absolute top-1 font-mono text-[10px] text-ink-3" style={{ left: xOf(h) + 4 }}>{fmtTime(h)}</span>
+                    <span key={h} className="meta absolute top-2" style={{ left: xOf(h) + 6 }}>{fmtTime(h)}</span>
                   ))}
                 </div>
               </div>
 
               {/* Channel rows */}
               {channels.map((ch) => (
-                <div key={ch.id} className="flex border-b border-white/[0.04]" style={{ height: ROW_H }}>
-                  <button onClick={() => navigate(`/chaine/${ch.id}`)} className="sticky left-0 z-10 flex shrink-0 items-center gap-2 border-r border-white/[0.08] bg-surface/95 px-2.5 text-left hover:bg-white/[0.04]" style={{ width: LABEL_W }}>
-                    <span className="grid h-8 w-10 shrink-0 place-items-center overflow-hidden rounded bg-white/[0.05]">
-                      {ch.logo ? <img src={ch.logo} alt="" loading="lazy" referrerPolicy="no-referrer" className="max-h-[80%] max-w-[85%] object-contain" /> : <Radio size={14} className="text-ink/30" />}
+                <div key={ch.id} data-prog-row="" className="flex border-b border-[var(--line-soft)]" style={{ height: ROW_H }}>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/chaine/${ch.id}`)}
+                    className="sticky left-0 z-10 flex shrink-0 items-center gap-2.5 border-r border-line bg-[var(--bg-1)] px-3 text-left"
+                    style={{ width: LABEL_W }}
+                    aria-label={ch.name}
+                  >
+                    <span className="grid h-8 w-10 shrink-0 place-items-center overflow-hidden rounded-field bg-mini" aria-hidden="true">
+                      {ch.logo ? <img src={ch.logo} alt="" loading="lazy" referrerPolicy="no-referrer" className="max-h-[80%] max-w-[85%] object-contain" /> : <Radio size={14} className="text-ink-3" />}
                     </span>
-                    <span className="truncate text-[12px] font-semibold text-ink">{ch.flag} {ch.name}</span>
+                    <span className="truncate text-sous font-semibold text-ink" translate="no">{ch.name}</span>
                   </button>
                   <div className="relative" style={{ width: gridW }}>
-                    {ch.programmes.map((p, i) => {
-                      const end = p.stop || p.start + 3600000;
-                      const left = xOf(p.start);
-                      const right = xOf(end);
-                      if (right <= 0 || left >= gridW) return null;
-                      const cl = Math.max(0, left);
-                      const w = Math.max(10, Math.min(gridW, right) - cl);
+                    {layout(ch.programmes, xOf, gridW).map(({ p, left, width, end }) => {
                       const isNow = p.start <= now && now < end;
                       return (
                         <button
-                          key={i}
-                          onClick={() => navigate(`/chaine/${ch.id}`)}
+                          key={`${p.start}-${p.title}`}
+                          type="button"
+                          data-prog=""
+                          onClick={() => (isNow ? playChannel(ch) : navigate(`/chaine/${ch.id}`))}
                           title={`${fmtTime(p.start)} ${p.title}`}
-                          className={clsx('absolute top-1 bottom-1 overflow-hidden rounded-md border px-2 text-left text-[11px] leading-tight', isNow ? 'border-accent/50 bg-accent/[0.14] text-ink' : 'border-white/[0.06] bg-white/[0.03] text-ink-2 hover:bg-white/[0.07]')}
-                          style={{ left: cl, width: w }}
+                          aria-label={`${fmtTime(p.start)} ${p.title}`}
+                          aria-busy={busy === ch.id || undefined}
+                          className={clsx(
+                            'absolute bottom-1.5 top-1.5 overflow-hidden rounded-field border px-2 text-left leading-tight',
+                            isNow ? 'border-line-strong bg-[var(--bg-4)] text-ink' : 'border-line bg-[var(--bg-2)] text-ink-2'
+                          )}
+                          style={{ left, width }}
                         >
-                          <span className="block font-mono text-[9px] text-accent/80">{fmtTime(p.start)}</span>
-                          <span className="block truncate font-medium">{p.title}</span>
+                          <span className="meta block">{fmtTime(p.start)}</span>
+                          <span className="block truncate text-libelle font-medium" translate="no">{p.title}</span>
                         </button>
                       );
                     })}
@@ -127,11 +204,9 @@ export function ProgrammeTv() {
                 </div>
               ))}
 
-              {/* Now marker */}
+              {/* Now line */}
               {nowX >= 0 && nowX <= gridW && (
-                <div className="pointer-events-none absolute z-[15] w-[2px] bg-live shadow-[0_0_8px_rgba(255,59,71,0.8)]" style={{ left: LABEL_W + nowX, top: 0, bottom: 0 }}>
-                  <span className="absolute -top-0 left-1 rounded bg-live px-1 py-[1px] font-mono text-[8px] font-bold text-white">{t('programme.now')}</span>
-                </div>
+                <div className="pointer-events-none absolute bottom-0 top-0 z-[15] w-[2px] bg-red" style={{ left: LABEL_W + nowX }} aria-hidden="true" />
               )}
             </div>
           </div>

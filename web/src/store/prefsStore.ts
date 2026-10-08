@@ -24,48 +24,76 @@ interface PrefsState {
   reset: () => void;
 }
 
-export const usePrefs = create<PrefsState>((set, get) => ({
-  prefs: EMPTY,
-  loaded: false,
+// WEB-21: saves are serialized. Every toggle applies at once (optimistic) and joins
+// the next PUT, which always carries the latest full prefs; only one PUT is in flight.
+// On failure the store reloads the server's copy instead of restoring a snapshot, so a
+// late failure never erases a later toggle that the server did accept.
+let inFlight = false;
+let waiters: ((ok: boolean) => void)[] = [];
 
-  load: async () => {
-    try {
-      const r = await api.get<{ prefs: WatchPrefs | null }>('/me/prefs');
-      set({ prefs: { ...EMPTY, ...(r.prefs || {}), home: { ...EMPTY.home, ...(r.prefs?.home || {}) } }, loaded: true });
-    } catch {
-      set({ prefs: EMPTY, loaded: true });
-    }
-  },
+const normalize = (p: Partial<WatchPrefs> | null | undefined): WatchPrefs => ({
+  ...EMPTY,
+  ...(p || {}),
+  home: { ...EMPTY.home, ...(p?.home || {}) },
+});
 
-  // Persist (premium only server-side; 402 for free users -> revert + false).
-  save: async (patch) => {
-    const previous = get().prefs;
-    const prefs = { ...previous, ...patch };
-    set({ prefs });
-    try {
-      await api.put('/me/prefs', { prefs });
-      return true;
-    } catch {
-      set({ prefs: previous }); // not premium / not logged in -> roll back
-      return false;
-    }
-  },
+export const usePrefs = create<PrefsState>((set, get) => {
+  const flush = () => {
+    if (inFlight || !waiters.length) return;
+    inFlight = true;
+    const batch = waiters;
+    waiters = [];
+    api
+      .put('/me/prefs', { prefs: get().prefs })
+      .then(() => true, () => false)
+      .then(async (ok) => {
+        // A newer save is already queued: it sends the latest prefs, its outcome decides.
+        if (!ok && !waiters.length) await get().load();
+        inFlight = false;
+        batch.forEach((r) => r(ok));
+        flush();
+      });
+  };
 
-  toggleHidden: (cat) => {
-    const h = get().prefs.hiddenCategories;
-    const hiddenCategories = h.includes(cat) ? h.filter((c) => c !== cat) : [...h, cat];
-    get().save({ hiddenCategories });
-  },
+  return {
+    prefs: EMPTY,
+    loaded: false,
 
-  togglePinned: (cat) => {
-    const p = get().prefs.pinnedCategories;
-    const pinnedCategories = p.includes(cat) ? p.filter((c) => c !== cat) : [...p, cat];
-    get().save({ pinnedCategories });
-  },
+    load: async () => {
+      try {
+        const r = await api.get<{ prefs: WatchPrefs | null }>('/me/prefs');
+        set({ prefs: normalize(r.prefs), loaded: true });
+      } catch {
+        set({ prefs: EMPTY, loaded: true });
+      }
+    },
 
-  setHome: (patch) => {
-    get().save({ home: { ...get().prefs.home, ...patch } });
-  },
+    // Persist (premium only server-side: a 402 for free users resolves false and the
+    // server's copy comes back).
+    save: (patch) => {
+      set({ prefs: { ...get().prefs, ...patch } });
+      return new Promise<boolean>((resolve) => {
+        waiters.push(resolve);
+        flush();
+      });
+    },
 
-  reset: () => set({ prefs: EMPTY, loaded: false }),
-}));
+    toggleHidden: (cat) => {
+      const h = get().prefs.hiddenCategories;
+      const hiddenCategories = h.includes(cat) ? h.filter((c) => c !== cat) : [...h, cat];
+      void get().save({ hiddenCategories });
+    },
+
+    togglePinned: (cat) => {
+      const p = get().prefs.pinnedCategories;
+      const pinnedCategories = p.includes(cat) ? p.filter((c) => c !== cat) : [...p, cat];
+      void get().save({ pinnedCategories });
+    },
+
+    setHome: (patch) => {
+      void get().save({ home: { ...get().prefs.home, ...patch } });
+    },
+
+    reset: () => set({ prefs: EMPTY, loaded: false }),
+  };
+});

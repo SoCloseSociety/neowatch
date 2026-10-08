@@ -1,120 +1,169 @@
 import { clsx } from 'clsx';
-import { X, Palette, MonitorPlay, Languages } from 'lucide-react';
-import { useSettings, ACCENTS, THEMES } from '@/store/settingsStore';
+import { X } from 'lucide-react';
+import { useSettings, THEMES, type ThemeName, type Density } from '@/store/settingsStore';
 import { useUI } from '@/store/uiStore';
+import { useCatalog } from '@/store/catalogStore';
+import type { Filters } from '@/types';
+import { isTV } from '@/lib/device';
 import { useI18n, useT, LANGS } from '@/lib/i18n';
-import { useEscapeClose } from './ui';
+import { Button, Overline, useEscapeClose } from './ui';
+
+const STYLES: { id: ThemeName; key: string }[] = [
+  { id: 'lunaire', key: 'set.lunaire' },
+  { id: 'doux', key: 'set.doux' },
+];
+const SORTS: { id: Filters['sort']; key: string }[] = [
+  { id: 'smart', key: 'pages.settings.sortSmart' },
+  { id: 'name', key: 'pages.settings.sortName' },
+  { id: 'latency', key: 'pages.settings.sortLatency' },
+];
+const DENSITIES: { id: Density; key: string }[] = [
+  { id: 'cozy', key: 'pages.settings.large' },
+  { id: 'comfortable', key: 'pages.settings.normal' },
+  { id: 'compact', key: 'pages.settings.compact' },
+];
 
 export function Settings() {
   const open = useUI((s) => s.settingsOpen);
   const setOpen = useUI((s) => s.setSettings);
   const s = useSettings();
+  const sort = useCatalog((c) => c.filters.sort);
+  const setFilters = useCatalog((c) => c.setFilters);
   const t = useT();
   const lang = useI18n((st) => st.lang);
   const setLang = useI18n((st) => st.setLang);
+  const tv = isTV();
   useEscapeClose(open, () => setOpen(false));
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={() => setOpen(false)}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--scrim-panneau)] p-4 backdrop-blur-sm" onClick={() => setOpen(false)}>
       <div
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-3xl border border-white/10 bg-panel p-5 shadow-2xl animate-fade-in"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        className="max-h-[88vh] w-full max-w-md overflow-y-auto rounded-card border border-line bg-[var(--surface-panneau)] p-[var(--pad-panneau)] shadow-menu animate-fade-in"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center gap-2">
-          <Palette size={18} className="text-accent" />
-          <h2 className="text-base font-semibold text-ink">{t('set.title')}</h2>
-          <button onClick={() => setOpen(false)} className="ml-auto rounded-lg p-1.5 text-ink/50 hover:bg-white/5">
-            <X size={18} />
-          </button>
+        <div className="mb-5 flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <Overline>{t('menu.settings')}</Overline>
+            <h2 id="settings-title" className="m-0 mt-1 text-titre2 font-semibold text-ink">{t('set.title')}</h2>
+          </div>
+          <Button variant="quiet" iconOnly onClick={() => setOpen(false)} aria-label={t('common.close')} title={t('common.close')} icon={<X size={18} aria-hidden="true" />} />
         </div>
 
         {/* Language */}
-        <Label icon={<Languages size={13} />}>{t('set.language')}</Label>
-        <div className="mb-4 grid grid-cols-3 gap-2">
-          {LANGS.map((l) => (
-            <button
-              key={l.code}
-              onClick={() => setLang(l.code)}
-              className={clsx('flex items-center justify-center gap-1.5 rounded-lg border py-2 text-[12px]', lang === l.code ? 'border-accent bg-accent/10 text-accent' : 'border-white/10 text-ink/60 hover:text-ink')}
-            >
-              <span>{l.flag}</span> {l.label}
-            </button>
-          ))}
-        </div>
+        <Group label={t('set.language')}>
+          <div role="radiogroup" aria-label={t('set.language')} className="grid grid-cols-3 gap-2">
+            {LANGS.map((l) => (
+              <Choice key={l.code} checked={lang === l.code} onClick={() => setLang(l.code)}>
+                <span translate="no" lang={l.code}>{l.label}</span>
+              </Choice>
+            ))}
+          </div>
+        </Group>
 
-        {/* Accent */}
-        <Label>{t('set.accent')}</Label>
-        <div className="mb-4 flex flex-wrap gap-2">
-          {Object.entries(ACCENTS).map(([name, rgb]) => (
-            <button
-              key={name}
-              onClick={() => s.set({ accent: name as keyof typeof ACCENTS })}
-              className={clsx('h-8 w-8 rounded-full border-2 transition-transform hover:scale-110', s.accent === name ? 'border-white' : 'border-transparent')}
-              style={{ background: `rgb(${rgb.join(',')})` }}
-              aria-label={name}
-            />
-          ))}
-        </div>
+        {/* Style: Lunaire (dark) or Doux (light). A TV is always Lunaire. */}
+        <Group label={t('set.theme')}>
+          {tv ? (
+            <p className="m-0 text-sous text-ink-2">{t('pages.settings.tvStyle')}</p>
+          ) : (
+            <div role="radiogroup" aria-label={t('set.theme')} className="grid grid-cols-2 gap-2">
+              {STYLES.map((st) => (
+                <Choice key={st.id} checked={s.theme === st.id} onClick={() => s.set({ theme: st.id })}>
+                  <span
+                    aria-hidden="true"
+                    className="h-5 w-5 shrink-0 rounded-pill border border-line-strong"
+                    style={{ background: `rgb(${THEMES[st.id].surface.join(',')})` }}
+                  />
+                  {t(st.key)}
+                </Choice>
+              ))}
+            </div>
+          )}
+        </Group>
 
-        {/* Theme */}
-        <Label>{t('set.theme')}</Label>
-        <div className="mb-4 grid grid-cols-4 gap-2">
-          {Object.entries(THEMES).map(([name, t]) => (
-            <button
-              key={name}
-              onClick={() => s.set({ theme: name as keyof typeof THEMES })}
-              className={clsx('rounded-lg border-2 p-2 text-[10px] capitalize', s.theme === name ? 'border-accent text-accent' : 'border-white/10 text-ink/50')}
-            >
-              <span className="mb-1 block h-6 w-full rounded" style={{ background: `rgb(${t.surface.join(',')})` }} />
-              {name}
-            </button>
-          ))}
-        </div>
+        {/* Channel order in the grid and the search results (left the filter bar, spec 2.3). */}
+        <Group label={t('pages.settings.sort')}>
+          <div role="radiogroup" aria-label={t('pages.settings.sort')} className="grid grid-cols-3 gap-2">
+            {SORTS.map((o) => (
+              <Choice key={o.id} checked={sort === o.id} onClick={() => setFilters({ sort: o.id })}>
+                {t(o.key)}
+              </Choice>
+            ))}
+          </div>
+        </Group>
 
-        {/* Density */}
-        <Label>{t('set.density')}</Label>
-        <div className="mb-4 grid grid-cols-3 gap-2">
-          {(['cozy', 'comfortable', 'compact'] as const).map((d) => (
-            <button
-              key={d}
-              onClick={() => s.set({ density: d })}
-              className={clsx('rounded-lg border py-2 text-[11px]', s.density === d ? 'border-accent bg-accent/10 text-accent' : 'border-white/10 text-ink/60')}
-            >
-              {d === 'cozy' ? 'Large' : d === 'comfortable' ? 'Normal' : 'Dense'}
-            </button>
-          ))}
-        </div>
+        {/* Grid size */}
+        <Group label={t('set.density')}>
+          <div role="radiogroup" aria-label={t('set.density')} className="grid grid-cols-3 gap-2">
+            {DENSITIES.map((d) => (
+              <Choice key={d.id} checked={s.density === d.id} onClick={() => s.set({ density: d.id })}>
+                {t(d.key)}
+              </Choice>
+            ))}
+          </div>
+        </Group>
 
-        {/* Playback toggles */}
-        <Label icon={<MonitorPlay size={13} />}>{t('set.playback')}</Label>
-        <div className="space-y-1">
-          <Switch label={t('set.defaultMuted')} checked={s.defaultMuted} onChange={(v) => s.set({ defaultMuted: v })} />
-          <Switch label={t('set.autoplay')} checked={s.autoplay} onChange={(v) => s.set({ autoplay: v })} />
-          <Switch label={t('set.preferProxy')} hint={t('set.preferProxyHint')} checked={s.preferProxy} onChange={(v) => s.set({ preferProxy: v })} />
-          <Switch label={t('set.showOffline')} checked={s.showOffline} onChange={(v) => s.set({ showOffline: v })} />
-          <Switch label={t('set.reduceMotion')} checked={s.reduceMotion} onChange={(v) => s.set({ reduceMotion: v })} />
-        </div>
+        {/* Playback */}
+        <Group label={t('set.playback')} last>
+          <div className="space-y-1">
+            <Switch label={t('pages.settings.muted')} checked={s.defaultMuted} onChange={(v) => s.set({ defaultMuted: v })} />
+            <Switch label={t('pages.settings.autoplay')} checked={s.autoplay} onChange={(v) => s.set({ autoplay: v })} />
+            <Switch label={t('pages.settings.relay')} hint={t('pages.settings.relayHint')} checked={s.preferProxy} onChange={(v) => s.set({ preferProxy: v })} />
+            <Switch label={t('pages.settings.offAir')} checked={s.showOffline} onChange={(v) => s.set({ showOffline: v })} />
+            <Switch label={t('pages.settings.motion')} checked={s.reduceMotion} onChange={(v) => s.set({ reduceMotion: v })} />
+          </div>
+        </Group>
       </div>
     </div>
   );
 }
 
-function Label({ children, icon }: { children: React.ReactNode; icon?: React.ReactNode }) {
-  return <p className="mb-1.5 flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-ink/40">{icon}{children}</p>;
+function Group({ label, children, last }: { label: string; children: React.ReactNode; last?: boolean }) {
+  return (
+    <section className={clsx(!last && 'mb-5')}>
+      <h3 className="m-0 mb-2 text-libelle font-semibold text-ink-2">{label}</h3>
+      {children}
+    </section>
+  );
+}
+
+function Choice({ checked, onClick, children }: { checked: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={checked}
+      onClick={onClick}
+      className={clsx(
+        'flex min-h-[var(--btn-h)] items-center justify-center gap-2 rounded-field border px-2 text-sous',
+        checked ? 'border-ink bg-[var(--bg-3)] font-semibold text-ink' : 'border-line text-ink-2'
+      )}
+    >
+      {children}
+    </button>
+  );
 }
 
 function Switch({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <button onClick={() => onChange(!checked)} className="flex w-full items-center gap-3 rounded-lg px-1 py-2 text-left hover:bg-white/[0.03]">
-      <div className={clsx('relative h-5 w-9 shrink-0 rounded-full transition-colors', checked ? 'bg-accent' : 'bg-white/10')}>
-        <span className={clsx('absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform', checked ? 'translate-x-4' : 'translate-x-0.5')} />
-      </div>
-      <div>
-        <span className="text-xs text-ink/80">{label}</span>
-        {hint && <span className="block text-[10px] text-ink/40">{hint}</span>}
-      </div>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="flex min-h-[var(--btn-h)] w-full items-center gap-3 rounded-field px-1 py-2 text-left"
+    >
+      <span aria-hidden="true" className={clsx('relative h-6 w-10 shrink-0 rounded-pill border transition-colors duration-d1', checked ? 'border-mint bg-mint' : 'border-line-strong bg-[var(--bg-3)]')}>
+        <span className={clsx('absolute top-[3px] h-4 w-4 rounded-pill bg-[var(--t1)] transition-transform duration-d1', checked ? 'translate-x-[19px]' : 'translate-x-[3px]')} />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sous text-ink">{label}</span>
+        {hint && <span className="block text-meta text-ink-3">{hint}</span>}
+      </span>
     </button>
   );
 }

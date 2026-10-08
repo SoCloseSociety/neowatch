@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // NEOWATCH integral integration test suite.
-// Run against a live server:  node tasks/integration-test.mjs
+// Run against a live server:  node test/integration-test.mjs
 // Env: BASE (default http://localhost:8787), ADMIN_EMAIL, ADMIN_PASSWORD.
 import { parseXmltv } from '../server/src/epg.js';
 
 const BASE = process.env.BASE || 'http://localhost:8787';
 // Admin creds for the admin-gated checks. Pass them via env -- never hardcode:
-//   ADMIN_EMAIL=... ADMIN_PASSWORD=... node tasks/integration-test.mjs
+//   ADMIN_EMAIL=... ADMIN_PASSWORD=... node test/integration-test.mjs
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || '';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 
@@ -14,7 +14,7 @@ let pass = 0, fail = 0;
 const fails = [];
 function check(name, cond, detail = '') {
   if (cond) { pass++; console.log(`  PASS  ${name}`); }
-  else { fail++; fails.push(name + (detail ? ` — ${detail}` : '')); console.log(`  FAIL  ${name}${detail ? ' — ' + detail : ''}`); }
+  else { fail++; fails.push(name + (detail ? ` -- ${detail}` : '')); console.log(`  FAIL  ${name}${detail ? ' -- ' + detail : ''}`); }
 }
 const enc = encodeURIComponent;
 const req = async (path, { method = 'GET', token, body, timeout = 12000 } = {}) => {

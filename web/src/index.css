@@ -7,7 +7,7 @@
  * Lunaire on :root (default), Doux on :root[data-theme="doux"], the phone
  * scale under 760 px, the 10-foot scale on :root[data-tv].
  * The shared names keep charte.css values byte for byte:
- *   node tasks/verify-design.mjs --tokens <SentinelHouse>/.../ui/charte.css
+ *   node test/verify-design.mjs --tokens <SentinelHouse>/.../ui/charte.css
  * Rules: no literal colour or text px outside these token blocks; text never
  * under 12 px; only transform and opacity animate; mint = state OK only.
  * ========================================================================== */
@@ -42,6 +42,8 @@
   --surface-menu: var(--bg-2);
   --surface-pill-image: rgba(10,13,16,.8);
   --encre-image: #f2f6f8;
+  /* Behind art that has no picture (a channel page without ambiance): dark in both styles. */
+  --fond-image: #0a0d10;
   --voile-image: linear-gradient(180deg, rgba(5,7,10,0) 30%, rgba(5,7,10,.86) 100%);
   --voile-hero: linear-gradient(90deg, rgba(5,7,10,.9) 0, rgba(5,7,10,.55) 38%, rgba(5,7,10,.08) 70%),
                 linear-gradient(180deg, rgba(5,7,10,0) 0, rgba(5,7,10,0) 30%, rgba(5,7,10,.92) 62%, rgba(5,7,10,1) 80%);
@@ -590,16 +592,10 @@
       transform: scale(var(--focus-echelle));
     }
   }
-  /* Horizontal rails: hide the scrollbar entirely. */
-  .nw-scroll::-webkit-scrollbar { height: 0; width: 0; }
-  .nw-scroll { scrollbar-width: none; scroll-behavior: smooth; }
   /* Thin scrollbar for inner panels (e.g. live chat). */
   .nw-thin::-webkit-scrollbar { width: 6px; }
   .nw-thin::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 6px; }
   .nw-thin { scrollbar-width: thin; }
-  /* Native windowing: the browser skips rendering off-screen cards (huge perf
-     win on the 16k-channel grid) while remembering their real size. */
-  .cv-card { content-visibility: auto; contain-intrinsic-size: auto 220px; }
 }
 
 @keyframes nwPoint {
@@ -624,4 +620,11 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--t3);
   background-clip: content-box;
+}
+
+/* Tailwind ships an `overline` utility (text-decoration-line: overline) with the
+   same name as our mono label class, emitted in the utilities layer AFTER it.
+   Unlayered and last, this keeps the label free of a line above it. */
+.overline {
+  text-decoration-line: none;
 }

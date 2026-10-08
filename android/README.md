@@ -161,8 +161,9 @@ Icons/banner are generated from `web/public/icon-512.png`: `python3 -I android/t
 
 1. Bump `versionCode` / `versionName` in `app/build.gradle` for every new release.
 2. Build + verify as above.
-3. Upload: `scp app/build/outputs/apk/release/app-release.apk helper-vps:/var/www/neowatch/app.apk`
-   (NOT via `deploy.sh`, which excludes `app.apk` on purpose to preserve it).
+3. Upload, from the repo root: `bash scripts/deploy.sh --apk android/app/build/outputs/apk/release/app-release.apk`
+   (a normal deploy never ships `app.apk`, it keeps the live one; `--apk` replaces it atomically and
+   keeps the previous APK in the rollback copy, see DEPLOY.md).
 4. Tell **Sentinel House** the app is now a WebView shell, so it drops the TWA-browser
    assumptions:
    - `sentinel_home/adaptateurs/androidtv.py`: `NAVIGATEURS_DE_TWA["co.soclose.neowatch.twa"]`

@@ -7,7 +7,11 @@ pages. The guide is grabbed on the VPS and hosted as a static file the server po
 - `iptv-org/epg` grabber lives at `/root/epg/epg` (clone, no chromium -- `PUPPETEER_SKIP_DOWNLOAD=1`).
 - `grab.sh` pulls several EU TV-guide sites, merges them with `merge.mjs`, gzips, and
   hosts the result at `/var/www/neowatch/epg.xml.gz`. It only swaps the live guide when
-  the merge yields >1000 programmes (so a partial/failed grab never blanks the guide).
+  the merge yields 30+ channels and 1000+ programmes (so a partial/failed grab never blanks
+  the guide), and the swap is atomic (gzip to a temp file next to it, then rename).
+- The repo copy is this folder (`scripts/epg/`). `scripts/deploy.sh` ships `grab.sh`,
+  `curate-fr.sh` and `merge.mjs` to `/root/epg/` on every deploy (no delete: `curated/` and the
+  grabber clone stay); `scripts/deploy.sh` protects `epg.xml.gz` from the web `--delete`.
 - Nightly cron: `12 4 * * * /root/epg/grab.sh >> /root/epg/grab.log 2>&1`.
 - The server reads it via `EPG_DEFAULT_URL=https://neowatch.soclose.co/epg.xml.gz` in
   `/root/neowatch/.env`.
