@@ -282,19 +282,21 @@ export const epgEnabled = () => flat.length > 0;
 function nowNext(channelId, now) {
   const list = byChannel.get(normEpgId(channelId));
   if (!list || !list.length) return null;
+  // Merged sources overlap (a 18:00-20:00 block over an 18:30 show, two shows at the
+  // same minute): the airing programme is the one that started last (shortest on a
+  // tie), and next is the first one starting after now -- never the current one again.
   let current = null;
   let next = null;
   for (let i = 0; i < list.length; i++) {
     const p = list[i];
-    const end = p.stop || (list[i + 1]?.start ?? p.start + 3600000);
-    if (p.start <= now && now < end) {
-      current = p;
-      next = list[i + 1] || null;
-      break;
-    }
     if (p.start > now) {
       next = p;
       break;
+    }
+    const end = p.stop || (list[i + 1]?.start ?? p.start + 3600000);
+    if (now < end && (!current || p.start > current.start
+      || (p.start === current.start && end - p.start < (current.stop || end) - current.start))) {
+      current = p;
     }
   }
   return { now: current, next };
