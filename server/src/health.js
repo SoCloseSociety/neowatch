@@ -2,10 +2,10 @@ import { Router } from 'express';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { safeFetch } from './netguard.js';
+import { safeFetch, readCapped, startsWithHls } from './netguard.js';
 import { rateLimit } from './ratelimit.js';
 import { config } from './config.js';
-import { getSweepTargets, isKnownStreamUrl, clearSelectCache } from './catalog.js';
+import { getSweepTargets, isKnownStreamUrl, clearSelectCache, getStreamMeta } from './catalog.js';
 
 const checkLimit = rateLimit({ windowMs: 60_000, max: 120, name: 'check' });
 
@@ -18,16 +18,39 @@ const TTL_MS = 5 * 60 * 1000;        // on-demand re-check window
 const SWEEP_TTL = config.healthSweepIntervalMs;
 const TIMEOUT_MS = 6000;
 const HEALTH_FILE = join(config.cacheDir, 'health.json');
+// A verdict older than this is "unknown" again for display and ranking: with the
+// sweep on every entry is re-probed each interval (12h = two missed passes);
+// without it nothing refreshes a verdict but an on-demand check.
+const STALE_MS = config.healthSweep ? 2 * SWEEP_TTL : 24 * 3600 * 1000;
+const fresh = (e) => (e && Date.now() - (e.checkedAt || 0) < STALE_MS ? e : null);
+// Playlist reads are bounded: a live playlist is a few KB, 512 KB is generous.
+const TEXT_MAX = 512 * 1024;
+
+// The catalog's OWN headers + origin for a stream URL: probes never take a
+// client's User-Agent / Referer (the verdict is shared by every user), and the
+// private-network permission follows the stream's origin (custom M3U only).
+export function streamMeta(url) {
+  const m = getStreamMeta(url);
+  return m ? { ua: m.userAgent, ref: m.referrer, custom: m.source === 'custom' } : null;
+}
+const lanOk = (url) => config.allowPrivateSources && streamMeta(url)?.custom === true;
 
 const firstUri = (txt) => txt.split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith('#'));
 
-async function fetchText(url, headers) {
+// Bounded: stops after the first bytes when the body is not a playlist (a raw
+// live .ts would otherwise be downloaded until the timeout), 512 KB otherwise.
+async function fetchText(url, headers, allowPrivate) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await safeFetch(url, { method: 'GET', headers, signal: ctrl.signal }, { allowPrivate: config.allowPrivateSources });
-    const text = res.ok ? await res.text().catch(() => '') : '';
-    if (!res.ok) { try { await res.body?.cancel(); } catch { /* */ } }
+    const res = await safeFetch(url, { method: 'GET', headers, signal: ctrl.signal }, { allowPrivate });
+    let text = '';
+    if (res.ok) {
+      const buf = await readCapped(res, TEXT_MAX, { truncate: true, peek: startsWithHls }).catch(() => null);
+      text = buf ? buf.toString('utf8') : '';
+    } else {
+      try { await res.body?.cancel(); } catch { /* */ }
+    }
     return { ok: res.ok, status: res.status, text, finalUrl: res.finalUrl || url };
   } finally {
     clearTimeout(timer);
@@ -35,16 +58,16 @@ async function fetchText(url, headers) {
 }
 
 // SHALLOW: is the manifest/stream reachable? (fast, one ranged GET)
-async function shallowProbe(url, headers) {
+async function shallowProbe(url, headers, allowPrivate) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await safeFetch(url, { method: 'GET', headers: { ...headers, Range: 'bytes=0-2047' }, signal: ctrl.signal }, { allowPrivate: config.allowPrivateSources });
+    const res = await safeFetch(url, { method: 'GET', headers: { ...headers, Range: 'bytes=0-2047' }, signal: ctrl.signal }, { allowPrivate });
     let online = res.ok || res.status === 206;
     const ct = res.headers.get('content-type') || '';
     if (online && /\.m3u8(\?|$)/i.test(url) && !/mpegurl/i.test(ct)) {
-      const text = await res.text().catch(() => '');
-      online = text.includes('#EXTM3U');
+      const buf = await readCapped(res, 64 * 1024, { truncate: true }).catch(() => null);
+      online = !!buf && buf.toString('utf8').includes('#EXTM3U');
     } else {
       try { await res.body?.cancel(); } catch { /* */ }
     }
@@ -56,15 +79,15 @@ async function shallowProbe(url, headers) {
 
 // DEEP: does a real video SEGMENT actually download? (manifest -> variant -> segment)
 // This is what determines whether a channel truly plays, vs just having a 200 manifest.
-async function deepProbe(url, headers) {
-  const m = await fetchText(url, headers);
+async function deepProbe(url, headers, allowPrivate) {
+  const m = await fetchText(url, headers, allowPrivate);
   if (!m.ok) return { online: false, status: m.status };
   if (!m.text.includes('#EXTM3U')) return { online: true, status: m.status }; // progressive/other: reachable = ok
   let mediaText = m.text, mediaUrl = m.finalUrl;
   if (/#EXT-X-STREAM-INF/i.test(m.text)) {
     const v = firstUri(m.text);
     if (!v) return { online: false, status: 'empty-master' };
-    const variant = await fetchText(new URL(v, m.finalUrl).toString(), headers);
+    const variant = await fetchText(new URL(v, m.finalUrl).toString(), headers, allowPrivate);
     if (!variant.ok || !variant.text.includes('#EXTM3U')) return { online: false, status: 'variant ' + variant.status };
     mediaText = variant.text; mediaUrl = variant.finalUrl;
   }
@@ -73,10 +96,11 @@ async function deepProbe(url, headers) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const r = await safeFetch(new URL(seg, mediaUrl).toString(), { method: 'GET', headers: { ...headers, Range: 'bytes=0-4095' }, signal: ctrl.signal }, { allowPrivate: config.allowPrivateSources });
+    const r = await safeFetch(new URL(seg, mediaUrl).toString(), { method: 'GET', headers: { ...headers, Range: 'bytes=0-4095' }, signal: ctrl.signal }, { allowPrivate });
     const ok = r.ok || r.status === 206;
     let bytes = 0;
-    if (ok) { const b = await r.arrayBuffer().catch(() => null); bytes = b ? b.byteLength : 0; }
+    // Range is a request, not a promise: read at most 64 KB of a segment.
+    if (ok) { const b = await readCapped(r, 64 * 1024, { truncate: true }).catch(() => null); bytes = b ? b.byteLength : 0; }
     else { try { await r.body?.cancel(); } catch { /* */ } }
     return { online: ok && bytes > 100, status: r.status };
   } finally {
@@ -88,8 +112,9 @@ async function probe(url, ua, ref, deep = false) {
   const headers = { 'User-Agent': ua || 'Mozilla/5.0 (NEOWATCH)' };
   if (ref) headers['Referer'] = ref;
   const t0 = performance.now();
+  const allowPrivate = lanOk(url);
   try {
-    const r = deep ? await deepProbe(url, headers) : await shallowProbe(url, headers);
+    const r = deep ? await deepProbe(url, headers, allowPrivate) : await shallowProbe(url, headers, allowPrivate);
     return { online: r.online, status: r.status, ms: Math.round(performance.now() - t0), checkedAt: Date.now(), deep };
   } catch (e) {
     return { online: false, status: String(e?.name === 'AbortError' ? 'timeout' : 'error'), ms: Math.round(performance.now() - t0), checkedAt: Date.now(), deep };
@@ -120,31 +145,52 @@ async function mapLimit(items, limit, fn) {
 }
 
 // ── Lookups used by the catalog (sort online-first, expose `online`) ──
+// A stale verdict reads as unknown (null). Entries carry checkedAt (ms epoch) so
+// a projection can say how old a badge is.
 export function getHealth(url) {
-  return cache.get(url) || null;
+  return fresh(cache.get(url));
 }
 export function isOnline(url) {
-  return cache.get(url)?.online === true;
+  return fresh(cache.get(url))?.online === true;
 }
 export function healthStats() {
-  let online = 0, offline = 0;
-  for (const v of cache.values()) v.online ? online++ : offline++;
-  return { checked: cache.size, online, offline };
+  let online = 0, offline = 0, stale = 0;
+  for (const v of cache.values()) {
+    if (!fresh(v)) stale++;
+    else if (v.online) online++;
+    else offline++;
+  }
+  return { checked: cache.size, online, offline, stale };
+}
+
+// Forget verdicts of URLs that left the catalog (only once a catalog is loaded).
+function pruneGone() {
+  if (!getSweepTargets().length) return 0;
+  let n = 0;
+  for (const url of cache.keys()) if (!isKnownStreamUrl(url)) { cache.delete(url); n++; }
+  return n;
 }
 
 // ── Persistence ────────────────────────────────────────────────
 let saveTimer = null;
+async function writeHealth() {
+  try {
+    await mkdir(config.cacheDir, { recursive: true }).catch(() => {});
+    const tmp = `${HEALTH_FILE}.${randomUUID()}.tmp`;
+    await writeFile(tmp, JSON.stringify([...cache.entries()]));
+    await rename(tmp, HEALTH_FILE);
+  } catch { /* ignore */ }
+}
 function scheduleSave() {
   if (saveTimer) return;
-  saveTimer = setTimeout(async () => {
-    saveTimer = null;
-    try {
-      await mkdir(config.cacheDir, { recursive: true }).catch(() => {});
-      const tmp = `${HEALTH_FILE}.${randomUUID()}.tmp`;
-      await writeFile(tmp, JSON.stringify([...cache.entries()]));
-      await rename(tmp, HEALTH_FILE);
-    } catch { /* ignore */ }
-  }, 5000);
+  saveTimer = setTimeout(() => { saveTimer = null; writeHealth(); }, 5000);
+}
+// Shutdown hook: write a pending (debounced) save now.
+export function flushHealth() {
+  if (!saveTimer) return Promise.resolve();
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  return writeHealth();
 }
 
 // ── Gentle background sweep ─────────────────────────────────────
@@ -186,7 +232,9 @@ export async function runSweep(force = false, deep = false) {
         clearSelectCache();
         await sweepPause();
       }
-      console.log(`[health] ${deep ? 'deep' : 'shallow'} sweep pass complete (${probed} probed, ${cache.size} cached)`);
+      const pruned = pruneGone();
+      if (pruned) scheduleSave();
+      console.log(`[health] ${deep ? 'deep' : 'shallow'} sweep pass complete (${probed} probed, ${pruned} pruned, ${cache.size} cached)`);
     } finally {
       sweeping = false;
     }
@@ -215,15 +263,23 @@ export const healthRouter = Router();
 
 healthRouter.post('/catalog/check', checkLimit, async (req, res) => {
   try {
-    const { items, force } = req.body || {};
+    const { items } = req.body || {};
     if (!Array.isArray(items)) return res.status(400).json({ error: 'items must be an array' });
+    // The verdict is SHARED (badges, hideOffline, ranking for every user), so a
+    // client chooses neither the headers of the probe nor to skip the 5 min cache:
+    // `force` is honoured for admins only, ua/ref come from the catalog entry.
+    const force = !!req.body.force && req.user?.role === 'admin';
     // Only probe well-formed items whose URL is a real catalog stream. This stops a
     // null/undefined item from crashing the worker (hang) and prevents the endpoint
     // from being used as an arbitrary-URL request emitter / port scanner.
     const batch = items
       .filter((it) => it && typeof it === 'object' && isKnownStreamUrl(it.url))
       .slice(0, 40);
-    const results = await mapLimit(batch, 8, async (it) => ({ id: it.id, ...(await checkOne(it, !!force)) }));
+    const results = await mapLimit(batch, 8, async (it) => {
+      const meta = streamMeta(it.url);
+      const r = await checkOne({ url: it.url, ua: meta?.ua, ref: meta?.ref }, force);
+      return { id: it.id, ...r };
+    });
     scheduleSave();
     res.json({ results });
   } catch {

@@ -6,24 +6,39 @@ import { useAuth } from '@/store/authStore';
 import { useUI } from '@/store/uiStore';
 import { useCatalog } from '@/store/catalogStore';
 import { useEscapeClose } from './ui';
-import { useT } from '@/lib/i18n';
+import { useT, useI18n } from '@/lib/i18n';
 import type { Plan } from '@/types';
+
+// GET /billing/plans: plans + copy come localized from the server (one source).
+// checkout=false: no payment step exists right now -> the CTA is shown disabled.
+interface PlansResponse {
+  plans: Plan[];
+  checkout?: boolean;
+  copy?: { notice: string | null; unavailableCta: string; activated: string; disclaimer: string };
+}
 
 export function Pricing() {
   const t = useT();
+  const lang = useI18n((s) => s.lang);
   const open = useUI((s) => s.pricingOpen);
   const setPricing = useUI((s) => s.setPricing);
   const setLogin = useUI((s) => s.setLogin);
   const { user, refresh, isPremium } = useAuth();
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [checkout, setCheckout] = useState(true);
+  const [copy, setCopy] = useState<PlansResponse['copy']>();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setMsg(null);
-    api.get<{ plans: Plan[] }>('/billing/plans').then((r) => setPlans(r.plans)).catch(() => {});
-  }, [open]);
+    api.get<PlansResponse>(`/billing/plans?lang=${lang}`).then((r) => {
+      setPlans(r.plans);
+      setCheckout(r.checkout !== false);
+      setCopy(r.copy);
+    }).catch(() => {});
+  }, [open, lang]);
   useEscapeClose(open, () => setPricing(false));
 
   if (!open) return null;
@@ -37,7 +52,7 @@ export function Pricing() {
     setBusy(true);
     setMsg(null);
     try {
-      const r = await api.post<{ activated?: boolean; url?: string }>('/billing/checkout', { plan: 'premium' });
+      const r = await api.post<{ activated?: boolean; url?: string; message?: string }>(`/billing/checkout?lang=${lang}`, { plan: 'premium' });
       if (r.url) {
         // Stripe: redirect to hosted checkout (premium granted by the webhook).
         window.location.href = r.url;
@@ -47,7 +62,7 @@ export function Pricing() {
         await refresh();
         await useCatalog.getState().loadMeta();
         await useCatalog.getState().loadChannels();
-        setMsg('🎉 Premium activé ! Sans pub, multi-écran étendu et sync activés.');
+        setMsg(r.message || copy?.activated || null);
         setTimeout(() => setPricing(false), 1200);
       }
     } catch (e) {
@@ -106,11 +121,11 @@ export function Pricing() {
               {p.id === 'premium' ? (
                 <button
                   onClick={upgrade}
-                  disabled={busy || isPremium()}
+                  disabled={busy || isPremium() || !checkout}
                   className="flex items-center justify-center gap-2 rounded-lg bg-accent py-2.5 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-50"
                 >
                   {busy ? <Loader2 size={16} className="animate-spin" /> : <Crown size={16} />}
-                  {isPremium() ? 'Déjà Premium' : user ? 'Passer Premium' : 'Se connecter pour souscrire'}
+                  {isPremium() ? 'Déjà Premium' : !checkout ? copy?.unavailableCta : user ? 'Passer Premium' : 'Se connecter pour souscrire'}
                 </button>
               ) : (
                 <div className="rounded-lg border border-white/10 py-2.5 text-center text-xs text-ink/40">Plan actuel par défaut</div>
@@ -120,10 +135,9 @@ export function Pricing() {
         </div>
 
         {msg && <p className="mt-4 rounded-lg bg-white/[0.04] px-3 py-2 text-center text-sm text-ink/80">{msg}</p>}
-        {premium && (
-          <p className="mt-3 text-center text-[11px] text-ink/30">
-            Vous payez pour le service (curation, EPG, multi-écran, sans pub), pas pour les flux publics eux-mêmes. Résiliable à tout moment.
-          </p>
+        {copy?.notice && !isPremium() && <p className="mt-4 text-center text-sm text-ink/60">{copy.notice}</p>}
+        {premium && copy?.disclaimer && (
+          <p className="mt-3 text-center text-[11px] text-ink/30">{copy.disclaimer}</p>
         )}
       </div>
     </div>

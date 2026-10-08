@@ -6,7 +6,7 @@ import { useAuth } from '@/store/authStore';
 import { useUI } from '@/store/uiStore';
 import { useCatalog } from '@/store/catalogStore';
 import { useEscapeClose } from './ui';
-import { useT } from '@/lib/i18n';
+import { useT, useI18n } from '@/lib/i18n';
 
 export function Account() {
   const open = useUI((s) => s.accountOpen);
@@ -15,6 +15,7 @@ export function Account() {
   const setPrefs = useUI((s) => s.setPrefs);
   const { user, logout, refresh } = useAuth();
   const t = useT();
+  const lang = useI18n((s) => s.lang);
   const [pw, setPw] = useState({ current: '', next: '' });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
@@ -62,10 +63,11 @@ export function Account() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.post('/billing/cancel');
+      // Premium stays on until the end of the paid period; the server's message says until when.
+      const r = await api.post<{ message?: string }>(`/billing/cancel?lang=${lang}`);
       await refresh();
       await useCatalog.getState().loadChannels();
-      setMsg({ kind: 'ok', text: 'Abonnement Premium résilié.' });
+      setMsg({ kind: 'ok', text: r.message || 'Abonnement Premium résilié.' });
     } catch {
       setMsg({ kind: 'err', text: 'Échec de la résiliation' });
     } finally {
@@ -99,7 +101,7 @@ export function Account() {
         </div>
 
         {/* Plan actions */}
-        {user.role !== 'admin' && (
+        {user.role !== 'admin' && !(user as { cancelAtPeriodEnd?: boolean }).cancelAtPeriodEnd && (
           user.premium ? (
             <button onClick={cancelPremium} disabled={busy} className="mb-4 w-full rounded-lg border border-white/10 py-2 text-sm text-ink/70 hover:border-rose-500/30 hover:text-rose-400 disabled:opacity-50">
               {t('account.cancel')}

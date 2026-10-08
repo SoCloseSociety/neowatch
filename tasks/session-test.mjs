@@ -381,12 +381,14 @@ const issued = []; // every token we see -- used at the end to grep the server l
       const signingSecret = createHmac('sha256', JWT_SECRET).update('neowatch:url-signing:v1').digest('hex');
       const target = `http://127.0.0.1:${UPSTREAM_PORT}/seg.ts`;
       const exp = Date.now() + 3600_000;
-      const sig = createHmac('sha256', signingSecret).update(`${exp}\n${target}`).digest('base64url');
+      // v2 link (signing.js): HMAC over ['v2', exp, url, ua, ref, root, lan]. lan=1 lets the
+      // proxy reach this local upstream (it is honoured only with ALLOW_PRIVATE_SOURCES=true).
+      const sig = createHmac('sha256', signingSecret).update(JSON.stringify(['v2', exp, target, '', '', '', 1])).digest('base64url');
       const due = craft({ sub: alg.id, role: 'user', tv: 0 }, RENEW_S + 1); issued.push(due);
       const ctl = await req('/api/config', { token: due });
       check('control: the due token IS renewed on a normal route', ctl.status === 200 && !!ctl.renewed);
       if (ctl.renewed) issued.push(ctl.renewed);
-      const px = await req(`/api/proxy?url=${encodeURIComponent(target)}&exp=${exp}&sig=${sig}`, { token: due });
+      const px = await req(`/api/proxy?url=${encodeURIComponent(target)}&lan=1&exp=${exp}&sig=${sig}`, { token: due });
       if (px.status === 403 || px.status === 502) console.log(`  SKIP  proxy answered ${px.status}: start the test server with ALLOW_PRIVATE_SOURCES=true for this section`);
       check('proxy with a due token -> 200 from the upstream', px.status === 200 && px.data === 'segment', `status=${px.status}`);
       check('proxy response carries NO X-Renewed-Token (no renewal on /api/proxy)', !px.renewed, px.renewed ? `header present (${px.renewed === forged ? 'upstream\'s forged token passed through' : 'renewal'})` : '');

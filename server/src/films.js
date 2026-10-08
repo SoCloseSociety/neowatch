@@ -8,8 +8,11 @@ import { safeFetch } from './netguard.js';
 
 const TTL_MS = 6 * 3600 * 1000;
 const SEARCH_TTL_MS = 6 * 3600 * 1000;
+const RETRY_MS = 10 * 60 * 1000; // after a failed refresh, the stale list is served this long
+const PLAY_CACHE_MAX = 1000;
 const playCache = new Map(); // identifier -> { at, url }
-let cache = { at: 0, films: [] };
+let cache = { at: 0, films: [], ids: new Set() };
+let inflight = null; // one upstream search at a time, shared by concurrent misses
 
 const IA = 'https://archive.org';
 // Require an h.264 derivative so every listed film is browser-playable.
@@ -39,8 +42,25 @@ async function fetchJson(url, timeoutMs = 12000) {
 
 const first = (v) => (Array.isArray(v) ? v[0] : v);
 
+// Fresh list within the TTL; past it, ONE refetch shared by every caller. When that
+// refetch fails, the previous list is served (stale beats a 503); only a cold start
+// with archive.org down has nothing to give.
 async function loadFilms() {
   if (cache.films.length && Date.now() - cache.at < SEARCH_TTL_MS) return cache.films;
+  if (!inflight) {
+    inflight = fetchFilms().finally(() => { inflight = null; });
+  }
+  try {
+    return await inflight;
+  } catch (e) {
+    if (!cache.films.length) throw e;
+    // Serve stale and wait 10 min before asking archive.org again.
+    cache.at = Math.max(cache.at, Date.now() - SEARCH_TTL_MS + RETRY_MS);
+    return cache.films;
+  }
+}
+
+async function fetchFilms() {
   const data = await fetchJson(SEARCH_URL);
   const docs = data?.response?.docs || [];
   const films = docs
@@ -53,7 +73,9 @@ async function loadFilms() {
       genres: (Array.isArray(d.subject) ? d.subject : [d.subject]).filter(Boolean).slice(0, 4),
       poster: `${IA}/services/img/${encodeURIComponent(d.identifier)}`,
     }));
-  cache = { at: Date.now(), films };
+  // An empty answer is not a catalog: keep what we had.
+  if (!films.length && cache.films.length) throw new Error('empty film list');
+  cache = { at: Date.now(), films, ids: new Set(films.map((f) => f.id)) };
   return films;
 }
 
@@ -61,7 +83,13 @@ async function loadFilms() {
 async function resolvePlayUrl(id) {
   const hit = playCache.get(id);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.url;
-  const meta = await fetchJson(`${IA}/metadata/${encodeURIComponent(id)}`);
+  let meta;
+  try {
+    meta = await fetchJson(`${IA}/metadata/${encodeURIComponent(id)}`);
+  } catch (e) {
+    if (hit) return hit.url; // stale download URL beats none (IA item paths are stable)
+    throw e;
+  }
   const files = (meta?.files || []).filter((f) => f && typeof f.name === 'string');
   // Prefer h.264 mp4 (best browser support); fall back to any mp4, then webm/ogv.
   const pick =
@@ -71,7 +99,10 @@ async function resolvePlayUrl(id) {
     files.find((f) => /\.(webm|ogv|ogg)$/i.test(f.name));
   if (!pick) return null;
   const url = `${IA}/download/${encodeURIComponent(id)}/${encodeURIComponent(pick.name)}`;
+  playCache.delete(id);
   playCache.set(id, { at: Date.now(), url });
+  // Bounded (ids are limited to the listed films, this is the belt to those braces).
+  while (playCache.size > PLAY_CACHE_MAX) playCache.delete(playCache.keys().next().value);
   return url;
 }
 
@@ -89,6 +120,10 @@ filmsRouter.get('/films/:id/play', async (req, res) => {
   const id = String(req.params.id);
   if (!/^[A-Za-z0-9._@-]{1,200}$/.test(id)) return res.status(400).json({ error: 'bad id' });
   try {
+    // Only the films we list (the public-domain feature_films set): this endpoint must
+    // not resolve arbitrary archive.org items.
+    await loadFilms();
+    if (!cache.ids.has(id)) return res.status(404).json({ error: 'not found' });
     const url = await resolvePlayUrl(id);
     if (!url) return res.status(404).json({ error: 'no playable file' });
     res.json({ url });

@@ -3,6 +3,67 @@
 > Plan-first board. Add checkable items before implementing. Mark complete as you go.
 > Add a "Review" section under each batch once done.
 
+## v2.0 -- Refonte (08/10/2026): audit complet + langage Sentinel House
+
+Owner: "analyse, audite, verifie, structure correctement, corrige, ameliore, perfectionne tout le projet", use ScanGithub, copy the Sentinel House design (design, funnels, approach), liaise with the other agents. Branch `refonte-2026-10` (local, not pushed).
+
+Audit: 8 dimensions x (auditor + adversarial verifier) = 177 findings, 176 confirmed (3 critical, ~45 high). Raw: session scratchpad `audit-merged.json`. Design reference: `SentinelHouse/08-sentinel-home/DESIGN-UNIFIE.md` + `ui/charte.css` (Lunaire).
+
+**FROZEN CONTRACT** (Sentinel House `direct.py`/`media.py`/`integrations.py` + Neo `bot/config.py`), confirmed with the sentinelhouse session on 08/10: `GET /api/catalog/channel/:id` (djb2 id, fields url/alternates/online/quality/logo/channelId/name), `GET /api/catalog/channels?q=` (id/name/online), `GET /api/catalog/meta` (categories/total/online), `GET /api/epg/now?ids=`, `GET /api/epg/day?id=`, page `/chaine/<id>`, package `co.soclose.neowatch.twa`, `GET /api/health` (key `ok`, Neo treats < 500 as healthy). Additive changes only.
+
+### Lot S1 -- proxy + stream signing (critical file proxy.js: plan)
+- [x] proxy.js: response-header ALLOWLIST (content-type, content-range, accept-ranges, cache-control, last-modified, etag; content-length only when not re-encoded). Never forward set-cookie, clear-site-data, CSP, HSTS, ACAO/ACAC, link, refresh, x-content-type-options.
+- [x] proxy.js: Content-Type forced to media types (video/*, audio/*, mpegurl, mp2t, mp4, octet-stream, dash, text/vtt, image/* for disguised segments as octet-stream); anything else -> application/octet-stream. Always set `Content-Security-Policy: default-src 'none'; sandbox`, `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin` AFTER the copy.
+- [x] proxy.js: rewrite only real HLS (body starts with #EXTM3U, whatever the content-type -> fixes text/plain playlists); never sign data:/skd: URIs; rewrite only 2xx bodies; manifest size cap; manifest micro-cache evicts expired entries; mid-stream upstream error destroys the client response.
+- [x] proxy.js: refuse blocklisted targets at serve time (signed URLs vended before a takedown).
+- [x] signing/config: signing key derived from the EFFECTIVE jwtSecret (never the 'neowatch-dev' literal).
+- [x] radio.js: cache stations unsigned, sign proxyUrl per request.
+- [x] health.js: /catalog/check ignores client UA/Referer for the shared verdict (uses the catalog's own ua/ref), `force` admin-only; projected verdicts carry checkedAt.
+- [x] netguard.js: NAT64/6to4/benchmark ranges blocked; ALLOW_PRIVATE_SOURCES scoped to admin source/EPG fetches only.
+
+### Lot S2 -- catalog + boot + routes (critical file catalog.js: plan)
+- [x] catalog.js: stale-while-revalidate (serve the current state, rebuild in background, backoff 10 min on failure); fetch timeout (AbortController 30s); stale disk cache fallback when iptv-org is down; atomic cache writes (tmp + rename); separate baseBuiltAt for the TTL.
+- [x] catalog.js: id stability WITHOUT changing the formula: index stableId(alt.url) -> item, persisted id -> channelId alias map (DATA_DIR/id-aliases.json, bounded), optional `?channelId=` fallback on `/catalog/channel/:id`; response adds `canonicalId` (additive). Log djb2 collisions.
+- [x] catalog.js: blocklist filters alternates too (copy, never mutate baseItems); atomic + serialized blocklist writes, errors propagate; corrupt file -> .bak + loud log.
+- [x] index.js: sources/EPG/health init independent of the catalog warm-up; `/api/health` = {ok, catalog:{total, ageMin, building}, epg:{...}} with 503 when the catalog is empty (key `ok` kept for Neo), user counts moved behind admin.
+- [x] index.js: proxy router mounted before gateContent (REQUIRE_AUTH=true breaks streams today); JSON 404 for unknown /api; error handler without stacks; listen errors exit; `/assets` 404 instead of SPA fallback; security headers on the document for the Express/Docker path (X-Frame-Options DENY, CSP frame-ancestors 'none', nosniff); compression skips /api/proxy; page/limit bounds.
+- [x] index.js: home rails titles localized (?lang=), rails reordered by health, hero spotlight only online channels with a matching category image.
+
+### Lot S3 -- auth, billing, sources, epg, films (critical file auth.js: plan)
+- [x] billing.js: mock checkout refused in production unless `ALLOW_MOCK_BILLING=true`; `planSource` (mock|stripe|admin); plans copy limited to what exists (EN/FR/RU from one source).
+- [x] billing.js: Stripe webhook fixed (branch on object type, invoice never downgrades, checkout grants only when paid, period end from items, idempotent by event id, 500 on persistence failure); cancel = cancel_at_period_end (mock: cancelAtPeriodEnd, keep planExpires); account deletion cancels the Stripe subscription; checkout sends customer OR customer_email; already-premium guard.
+- [x] auth.js: typed + capped register/login/admin inputs; roaming favorites/multi validated (shape + size) and stored without proxyUrl; pairing throttle + pool cap per IP; prefsRouter no-store scoped to its own routes; GDPR export `GET /api/auth/me/export`.
+- [x] sources.js / epg.js: public projections without url/lastError; admin GET routes with them; a failed fetch keeps the previous data; save chain recovers after a failed write; serialized rebuilds; EPG search throttled + capped; XMLTV parser linear on unclosed tags; admin EPG streaming size cap.
+- [x] films.js / radio.js: serve stale data on upstream failure; films play endpoint validates the IA id + bounded cache.
+
+#### Review (S1-S3, 08/10)
+Three implementers on disjoint files + one adversarial reviewer. integration 66/66, session 83/83, s1 70/70, s2 live 45/45 + fake 56/56 (+ stale 26/26, empty 4/4 by the implementer), s3 dev 83/83 + prod 60/60 + stripe 78/78, typecheck + build green, frozen contract checked route by route (additive only: `canonicalId`, `checkedAt`, `heroCategory`, `?channelId=`). Real playback through the proxy 3/3 before and after.
+Behaviour changes to know: mock checkout closes in production unless `ALLOW_MOCK_BILLING=true` (owner's call); `/api/health` returns 503 when the catalog is empty or older than 2x TTL (user counts admin-only); a taken-down stream answers 410 at the proxy; health verdicts older than 12h count as unknown; proxied URLs carry `Cross-Origin-Resource-Policy: same-origin`.
+Open for OPS: `.env.example` (drop ACCESS_PASSWORD, add ALLOW_MOCK_BILLING, ALLOW_PRIVATE_SOURCES scope), DEPLOY.md Stripe events + 410, `tasks/epg/grab.sh` atomic write, nginx document headers (X-Frame-Options DENY, CSP frame-ancestors, nosniff, HSTS) -- prod nginx edit needs the owner's explicit OK.
+
+### Lot W0 -- design foundation (alone, first)
+- [ ] Tokens Lunaire in index.css + tailwind mapping, IBM Plex Sans/Mono, focus ring (bone white + halo + scale), ui primitives (button primary/secondary/discreet, pill, empty state with action, toast), 12px floor, reduced motion, one primary action rule. Exact spec: see Design spec section below.
+
+### Lots W1..Wn -- pages (parallel, disjoint files) -- filled from the design spec
+### Lot W-logic -- web correctness
+- [ ] sw.js: cache-first only for hashed /assets with res.ok and non-HTML; navigation branch only for request.mode==='navigate'; never cache errors. App: vite:preloadError reload-once + ErrorBoundary.
+- [ ] Stores: guarded localStorage everywhere; persist only stable channel fields (no proxyUrl); `freshChannel()` re-resolves via the frozen `/catalog/channel/:id` before play / mosaic; favorites merge (server + local) instead of overwrite; logout clears per-account state; cross-tab user refresh; /api/config retried.
+- [ ] HlsVideo.tsx (critical, plan): on fatal 403 in proxy mode refetch the channel once and reload; fallback to proxy only for network/manifest errors, never codec errors or after direct playback started; blocked unmuted autoplay -> retry muted, not escalation; stall recovery does not jump to buffer end on VOD; native path only if canPlayType HLS.
+- [ ] TV: Back key (Escape, Backspace, 4, 10009, 461) closes the top overlay; overlays in history; focus taken, trapped and restored; Player arrows do not hijack menus; ChannelDetail focuses Watch; `?play=1` autostart (additive, tell Sentinel).
+- [ ] i18n: browser-language detection (EN first), every hardcoded FR string moved to i18n (EN/FR/RU), Intl locale follows the UI language.
+
+### Lot TV-APK -- Android TV that works without Chrome
+- [ ] `android/` WebView shell project in the repo (same package `co.soclose.neowatch.twa`, same signing key from `~/Documents/VsCodeN30/neowatch-signing`, never committed), Leanback launcher + banner, D-pad, autoplay allowed, Back = history back. Build locally; DO NOT publish to /app.apk until the owner says so and Sentinel updates `androidtv.py` (NAVIGATEURS_DE_TWA).
+
+### Lot OPS -- last
+- [ ] Deps: compression ^1.8.2, express ^4.22.3, proxy-addr 2.0.8, undici ^6.29 (stay on 6: VPS Node 20), react-router 6.30.6. deploy.sh ships the lockfile + `npm ci --omit=dev`, keeps excludes only on --delete (filter rules), post-deploy health + catalog check, rollback.
+- [ ] Structure: `scripts/` (deploy, epg, android), `test/` (integration, session, e2e, contract), root `npm test`; CI runs session suite + contract test + `npm audit --audit-level=high`, `permissions: contents: read`.
+- [ ] Docker: .dockerignore excludes keystores, prod-only deps, non-root user, compose works out of the box.
+- [ ] Docs: NEO_CONNECTOR (frozen contract + Sentinel + Neo), CLAUDE.md, README, DEPLOY, .env.example, tests.md, lessons.md updated; obsolete purge script removed; em dashes removed from tracked files.
+
+### Deploy (owner go-ahead required)
+- [ ] `bash scripts/deploy.sh` after all lots are green; tell sentinelhouse-c3 when live.
+
 ## Backlog / Next
 
 - [ ] Native PNG icons (192/512/maskable) for best iOS "Add to Home Screen".

@@ -1,4 +1,7 @@
 // Small shared helpers used by the catalog and the custom-sources modules.
+import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 const YT_RE = /youtube\.com|youtu\.be/i;
 const DASH_RE = /\.mpd(\?|$)/i;
@@ -28,4 +31,26 @@ export function stableId(url) {
   let h = 5381;
   for (let i = 0; i < url.length; i++) h = ((h << 5) + h + url.charCodeAt(i)) | 0;
   return (h >>> 0).toString(36);
+}
+
+// FNV-1a 32-bit -> unsigned int. Cheap, well-spread hash for tie-breaks/rotations
+// (NOT used for ids: the id formula above is part of the frozen contract).
+export function hash32(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+
+// Write a file atomically (tmp + rename in the same directory): a crash mid-write
+// leaves the previous version intact instead of a truncated file.
+export async function writeFileAtomic(file, data) {
+  await mkdir(dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, data);
+    await rename(tmp, file);
+  } catch (err) {
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
 }

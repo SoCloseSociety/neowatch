@@ -25,13 +25,17 @@ export function parseDurationMs(v) {
 }
 const hasUnit = (v) => /[a-z]\s*$/i.test(String(v ?? ''));
 
+// No hardcoded default: if unset, generate a strong random secret per boot
+// (tokens are unforgeable but ephemeral in dev). Prod must set one explicitly
+// so tokens/signed URLs survive restarts -- enforced at boot in index.js.
+const jwtSecret = process.env.JWT_SECRET || randomBytes(48).toString('base64url');
+
 export const config = {
   root: ROOT,
   port: Number(process.env.PORT) || 8787,
   catalogTtlMs: (Number(process.env.CATALOG_TTL_HOURS) || 12) * 3600 * 1000,
   apiBase: (process.env.IPTV_API_BASE || 'https://iptv-org.github.io/api').replace(/\/$/, ''),
   hideNsfw: bool(process.env.HIDE_NSFW, true),
-  accessPassword: process.env.ACCESS_PASSWORD || '',
   allowedOrigins: (process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((s) => s.trim())
@@ -48,10 +52,7 @@ export const config = {
   requireAuth: bool(process.env.REQUIRE_AUTH, false),
   // Allow visitors to self-register a free account. Admins are created from env.
   allowRegister: bool(process.env.ALLOW_REGISTER, true),
-  // No hardcoded default: if unset, generate a strong random secret per boot
-  // (tokens are unforgeable but ephemeral in dev). Prod must set one explicitly
-  // so tokens/signed URLs survive restarts -- enforced at boot in index.js.
-  jwtSecret: process.env.JWT_SECRET || randomBytes(48).toString('base64url'),
+  jwtSecret,
   jwtSecretExplicit: !!process.env.JWT_SECRET,
   // Shorter default reduces the blast radius of a leaked token. Sessions that are
   // USED slide (a fresh token is issued once a token is older than JWT_RENEW_AFTER,
@@ -62,14 +63,17 @@ export const config = {
   jwtTtl: process.env.JWT_TTL || '7d',
   jwtRenewAfterMs: parseDurationMs(process.env.JWT_RENEW_AFTER), // null = half-life
   // Separate key for HMAC URL signing (key separation from JWT). Derived from the
-  // JWT secret with a distinct label so it survives restarts without a new env var,
-  // or set SIGNING_SECRET explicitly.
+  // EFFECTIVE JWT secret with a distinct label so it survives restarts without a
+  // new env var, or set SIGNING_SECRET explicitly. Never from a literal: with
+  // JWT_SECRET unset the key is as random (and per boot) as the dev JWT secret.
   signingSecret: process.env.SIGNING_SECRET ||
-    createHmac('sha256', process.env.JWT_SECRET || 'neowatch-dev').update('neowatch:url-signing:v1').digest('hex'),
+    createHmac('sha256', jwtSecret).update('neowatch:url-signing:v1').digest('hex'),
   adminEmail: process.env.ADMIN_EMAIL || 'admin@neowatch.local',
   adminPassword: process.env.ADMIN_PASSWORD || '',
-  // Allow admin M3U sources to point at private/LAN hosts (e.g. your own
-  // provider on the local network). Off by default (SSRF-safe).
+  // Allow admin M3U sources / EPG to point at private/LAN hosts (e.g. your own
+  // provider on the local network), and the proxy + health probes to reach the
+  // streams of those custom sources. Third-party (iptv-org, radio) streams keep
+  // the full SSRF guard either way. Off by default.
   allowPrivateSources: bool(process.env.ALLOW_PRIVATE_SOURCES, false),
   // ── Monetization ─────────────────────────────────────────────
   // Channels in these categories require a paid (premium) plan; everything
@@ -163,7 +167,9 @@ export function validateConfig() {
   }
   if (!(Number(config.premiumPrice) > 0)) add('warn', 'PREMIUM_PRICE', 'Not a positive number.');
   if (!config.premiumCategories.length) add('info', 'PREMIUM_CATEGORIES', 'Empty: every channel is free.');
-  if (config.allowPrivateSources) add('warn', 'ALLOW_PRIVATE_SOURCES', 'Enabled: SSRF guard is bypassed for source/EPG fetches.');
+  if (config.allowPrivateSources) add('warn', 'ALLOW_PRIVATE_SOURCES', 'Enabled: SSRF guard is bypassed for admin source/EPG fetches and the streams of custom (M3U) sources.');
+  // Removed setting (it never gated anything): say so instead of failing silently.
+  if (process.env.ACCESS_PASSWORD) add('warn', 'ACCESS_PASSWORD', 'No longer supported (it never gated anything). Use REQUIRE_AUTH=true + ALLOW_REGISTER=false to close an instance.');
   if ((config.isProd || config.requireAuth) && !config.allowedOrigins.length && config.trustProxy === false) {
     add('info', 'TRUST_PROXY', 'Behind a reverse proxy? Set TRUST_PROXY so rate limiting sees real client IPs.');
   }

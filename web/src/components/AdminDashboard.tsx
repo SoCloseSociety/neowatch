@@ -161,13 +161,20 @@ export function AdminDashboard() {
                   </td>
                   <td className="px-4 py-2.5">
                     <span className={clsx('font-mono text-[10px]', u.status === 'active' ? 'text-emerald-400' : 'text-rose-400')}>{u.status}</span>
-                    <span className={clsx('ml-2 rounded px-1.5 py-0.5 font-mono text-[9px]', u.plan === 'premium' || u.premium ? 'bg-amber-500/15 text-amber-300' : 'bg-white/5 text-ink/40')}>
-                      {u.plan === 'premium' || u.premium ? 'premium' : 'free'}
+                    {/* u.premium is the effective state (expiry checked server-side); a stored
+                        plan:'premium' past its planExpires is shown as expired, not premium. */}
+                    <span className={clsx('ml-2 rounded px-1.5 py-0.5 font-mono text-[9px]', u.premium ? 'bg-amber-500/15 text-amber-300' : 'bg-white/5 text-ink/40')}>
+                      {u.premium ? 'premium' : u.plan === 'premium' ? 'expiré' : 'free'}
                     </span>
+                    {u.role !== 'admin' && u.plan === 'premium' && u.planExpires && (
+                      <span className="ml-1.5 font-mono text-[9px] text-ink/40">
+                        {u.premium ? "jusqu'au " : 'depuis le '}{new Date(u.planExpires).toLocaleDateString('fr')}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => setUserPlan(u.id, u.plan === 'premium' ? 'free' : 'premium')} title="Basculer Premium" className={clsx('rounded p-1.5 hover:text-amber-300', u.plan === 'premium' ? 'text-amber-400' : 'text-ink/50')}>
+                      <button onClick={() => setUserPlan(u.id, u.premium ? 'free' : 'premium')} title={u.premium ? 'Retirer Premium' : 'Offrir Premium'} className={clsx('rounded p-1.5 hover:text-amber-300', u.premium ? 'text-amber-400' : 'text-ink/50')}>
                         <Crown size={14} />
                       </button>
                       <button onClick={() => patch(u.id, { role: u.role === 'admin' ? 'user' : 'admin' })} title="Basculer admin" className="rounded p-1.5 text-ink/50 hover:text-accent">
@@ -303,7 +310,8 @@ function SourcesManager() {
 
   const load = async () => {
     try {
-      const r = await api.get<{ sources: Source[] }>('/sources');
+      // Admin route: carries url + lastError (the public /sources list does not).
+      const r = await api.get<{ sources: Source[] }>('/admin/sources');
       setSources(r.sources);
     } catch {
       /* ignore */
@@ -430,7 +438,8 @@ function EpgManager() {
 
   const load = async () => {
     try {
-      const r = await api.get<{ sources: EpgSource[] }>('/epg/sources');
+      // Admin route: carries url + lastError (the public /epg/sources list does not).
+      const r = await api.get<{ sources: EpgSource[] }>('/admin/epg');
       setSources(r.sources);
     } catch {
       /* ignore */

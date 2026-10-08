@@ -11,8 +11,10 @@ const API = 'https://all.api.radio-browser.info/json/stations/search';
 const TTL_MS = 6 * 3600 * 1000;
 const FETCH_COUNT = 800;   // top stations by clicks, worldwide
 const PAGE_MAX = 200;
+const RETRY_MS = 10 * 60 * 1000; // after a failed refresh, keep serving the old list this long
 
 let cache = { at: 0, stations: [] };
+let loading = null;
 
 async function fetchJson(url, timeoutMs = 15000) {
   const ctrl = new AbortController();
@@ -28,8 +30,25 @@ async function fetchJson(url, timeoutMs = 15000) {
 
 const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 
+// Stations are cached UNSIGNED: a proxy signature lives 2h, the list 6h, so the
+// signed proxyUrl is added per response (signStation), never stored.
 async function loadStations() {
   if (cache.stations.length && Date.now() - cache.at < TTL_MS) return cache.stations;
+  if (!loading) {
+    loading = fetchStations()
+      .catch((e) => {
+        // radio-browser down: the previous list beats an empty page. Retry later.
+        if (!cache.stations.length) throw e;
+        console.warn(`[radio] refresh failed (${e.message}), serving the cached list`);
+        cache = { ...cache, at: Date.now() - TTL_MS + RETRY_MS };
+        return cache.stations;
+      })
+      .finally(() => { loading = null; });
+  }
+  return loading;
+}
+
+async function fetchStations() {
   const url = `${API}?limit=${FETCH_COUNT}&order=clickcount&reverse=true&hidebroken=true`;
   const data = await fetchJson(url);
   const seen = new Set();
@@ -42,9 +61,6 @@ async function loadStations() {
         id: s.stationuuid,
         name: String(s.name).trim().slice(0, 80),
         url: streamUrl,
-        // HTTP streams are blocked on our HTTPS page (mixed content) -> the
-        // player uses the signed proxy for those; HTTPS plays direct (no VPS load).
-        proxyUrl: proxyLink(streamUrl),
         favicon: /^https:\/\//i.test(s.favicon || '') ? s.favicon : null,
         country: s.country || null,
         countryCode: s.countrycode || null,
@@ -55,9 +71,16 @@ async function loadStations() {
         _search: norm(`${s.name} ${s.country || ''} ${s.tags || ''}`),
       };
     });
+  // An empty answer while we hold a list is an upstream hiccup, not "no radios".
+  if (!stations.length && cache.stations.length) throw new Error('empty station list');
   cache = { at: Date.now(), stations };
   return stations;
 }
+
+// HTTP streams are blocked on our HTTPS page (mixed content) -> the player uses
+// the signed proxy for those; HTTPS plays direct (no VPS load). Signed per
+// response so the link is always fresh (a page is at most PAGE_MAX HMACs).
+const signStation = ({ _search, ...s }) => ({ ...s, proxyUrl: proxyLink(s.url) });
 
 export const radioRouter = Router();
 
@@ -77,7 +100,7 @@ radioRouter.get('/radios', async (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 60, 1), PAGE_MAX);
     const page = Math.max(Number(req.query.page) || 1, 1);
     const start = (page - 1) * limit;
-    const items = list.slice(start, start + limit).map(({ _search, ...s }) => s);
+    const items = list.slice(start, start + limit).map(signStation);
     res.json({ total: list.length, page, limit, pages: Math.ceil(list.length / limit), items });
   } catch {
     res.status(503).json({ total: 0, items: [], error: 'radios unavailable' });

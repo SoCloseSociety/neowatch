@@ -8,6 +8,10 @@ import { setCustomItems } from './catalog.js';
 import { safeFetch } from './netguard.js';
 
 const MAX_PLAYLIST_BYTES = 25 * 1024 * 1024; // 25 MB hard cap on a remote playlist
+const REFRESH_MS = 6 * 60 * 60 * 1000;      // re-fetch URL playlists every 6h
+const RETRY_MS = 15 * 60 * 1000;            // a failed source is retried sooner
+const NAME_MAX = 80;
+const URL_MAX = 2048;
 const NSFW_RE = /\b(xxx|porn|adult|18\+|sex|erotic|hot ?cam|brazzers)\b/i;
 
 // User-supplied M3U / M3U8 playlists (e.g. the user's own IPTV provider).
@@ -17,17 +21,32 @@ const NSFW_RE = /\b(xxx|porn|adult|18\+|sex|erotic|hot ?cam|brazzers)\b/i;
 const SOURCES_FILE = join(config.dataDir, 'sources.json');
 let sources = [];   // [{ id, name, url, addedAt, count, lastError, lastFetched }]
 let loaded = false;
+// Last good parse per source id: a provider blip (timeout, 5xx, truncated body) keeps
+// the channels we already had instead of removing them until the next refresh.
+const lastGood = new Map(); // srcId -> items[]
+let refreshTimer = null;
+let retryTimer = null;
 
+// The caller gets this write's outcome; the queue itself never stays rejected (one
+// failed write must not skip every later save).
 let writeChain = Promise.resolve();
 function save() {
-  writeChain = writeChain.then(async () => {
+  const p = writeChain.then(async () => {
     await mkdir(config.dataDir, { recursive: true }).catch(() => {});
     const tmp = `${SOURCES_FILE}.${randomUUID()}.tmp`;
     await writeFile(tmp, JSON.stringify(sources, null, 2));
     await rename(tmp, SOURCES_FILE);
   });
-  return writeChain;
+  writeChain = p.catch(() => {});
+  return p;
 }
+
+// Express 4 does not catch a rejected async handler (the request would hang).
+const wrap = (fn) => (req, res, next) =>
+  Promise.resolve(fn(req, res, next)).catch((e) => {
+    console.error('[sources] route failed:', e?.message || e);
+    if (!res.headersSent) res.status(500).json({ error: 'internal error' });
+  });
 
 // Map a free-text group-title to a known category id when possible.
 function inferCategory(group) {
@@ -170,29 +189,71 @@ async function fetchSource(src) {
   return parseM3U(text, src.name);
 }
 
-// Re-fetch every source and push the merged custom items into the catalog.
-async function rebuildCustom() {
+// Merge every source into the catalog. force = re-fetch URL sources; otherwise a source
+// already parsed (lastGood) is reused, so a delete or an add never re-downloads the rest.
+// On a failed fetch the source keeps its last good channels and records lastError.
+async function doRebuild(force) {
+  let failed = false;
+  for (const src of sources) {
+    let items = lastGood.get(src.id);
+    if (src.inline) {
+      if (!items) items = parseM3U(src.inline, src.name);
+    } else if (force || !items) {
+      try {
+        items = await fetchSource(src);
+        src.lastError = null;
+        src.lastFetched = Date.now();
+      } catch (e) {
+        src.lastError = String(e?.message || e);
+        failed = true;
+      }
+    }
+    if (!items) { src.count = 0; continue; }
+    lastGood.set(src.id, items);
+    src.count = items.length;
+  }
+  // Merge from the CURRENT list: a source deleted while we were fetching must not come back.
+  const live = new Set(sources.map((s) => s.id));
+  for (const id of lastGood.keys()) if (!live.has(id)) lastGood.delete(id);
   const all = [];
   const seen = new Set();
   for (const src of sources) {
-    try {
-      const items = src.inline ? parseM3U(src.inline, src.name) : await fetchSource(src);
-      src.count = items.length;
-      src.lastError = null;
-      src.lastFetched = Date.now();
-      for (const it of items) {
-        if (seen.has(it.url)) continue;
-        seen.add(it.url);
-        all.push(it);
-      }
-    } catch (e) {
-      src.count = 0;
-      src.lastError = String(e?.message || e);
+    for (const it of lastGood.get(src.id) || []) {
+      if (seen.has(it.url)) continue;
+      seen.add(it.url);
+      all.push(it);
     }
   }
   setCustomItems(all);
+  if (failed) scheduleRetry();
   await save();
   return all.length;
+}
+
+// Serialized: rebuilds run one after the other, each reading `sources` when it starts,
+// so the last mutation always wins (a slow refresh can no longer re-add a deleted
+// source by finishing last). The queue survives a failed run.
+let rebuildChain = Promise.resolve();
+function rebuildCustom(force = false) {
+  const p = rebuildChain.then(() => doRebuild(force));
+  rebuildChain = p.catch(() => {});
+  return p;
+}
+
+function scheduleRetry() {
+  if (retryTimer) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    rebuildCustom(true).catch(() => {});
+  }, RETRY_MS);
+  retryTimer.unref?.();
+}
+function ensureRefreshTimer() {
+  if (refreshTimer || !sources.some((s) => s.url)) return;
+  refreshTimer = setInterval(() => {
+    rebuildCustom(true).then((n) => console.log(`[sources] refreshed, ${n} custom channels`)).catch(() => {});
+  }, REFRESH_MS);
+  refreshTimer.unref?.();
 }
 
 export async function initSources() {
@@ -205,13 +266,20 @@ export async function initSources() {
     loaded = true;
   }
   if (sources.length) {
-    const n = await rebuildCustom().catch(() => 0);
+    const n = await rebuildCustom(true).catch(() => 0);
     console.log(`[sources] loaded ${sources.length} M3U source(s), ${n} custom channels`);
   }
+  ensureRefreshTimer();
 }
 
+// Public projection: no url (provider playlists carry credentials, and the playlist
+// itself would bypass the custom-channel lock) and no error text (it can echo hosts).
 const publicSrc = (s) => ({
-  id: s.id, name: s.name, url: s.url, addedAt: s.addedAt,
+  id: s.id, name: s.name, count: s.count || 0, lastFetched: s.lastFetched || null, hasError: !!s.lastError,
+});
+// Admin projection: everything but the inline playlist body.
+const adminSrc = (s) => ({
+  id: s.id, name: s.name, url: s.url || null, addedAt: s.addedAt,
   count: s.count || 0, lastError: s.lastError || null, lastFetched: s.lastFetched || null,
 });
 
@@ -221,40 +289,49 @@ sourcesPublicRouter.get('/sources', (_req, res) => res.json({ sources: sources.m
 
 export const sourcesAdminRouter = Router();
 
-sourcesAdminRouter.post('/sources', async (req, res) => {
+sourcesAdminRouter.get('/sources', (_req, res) => res.json({ sources: sources.map(adminSrc) }));
+
+sourcesAdminRouter.post('/sources', wrap(async (req, res) => {
   const { name, url, text } = req.body || {};
-  if (!name) return res.status(400).json({ error: 'name required' });
+  if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name required' });
+  const label = name.trim().slice(0, NAME_MAX);
 
   try {
-    if (text) {
-      // Inline playlist text: store as an inline source.
-      const items = parseM3U(text, name);
+    if (typeof text === 'string' && text) {
+      // Inline playlist text: store as an inline source (size bounded by the JSON body limit).
+      const items = parseM3U(text, label);
       if (!items.length) return res.status(400).json({ error: 'no channels found in playlist text' });
-      const src = { id: randomUUID(), name, url: null, inline: text, addedAt: Date.now(), count: items.length };
+      const src = { id: randomUUID(), name: label, url: null, inline: text, addedAt: Date.now(), count: items.length };
+      lastGood.set(src.id, items);
       sources.push(src);
-    } else if (url && /^https?:\/\//i.test(url)) {
-      const src = { id: randomUUID(), name, url, addedAt: Date.now(), count: 0 };
-      await fetchSource(src); // validate before saving
+    } else if (typeof url === 'string' && url.length <= URL_MAX && /^https?:\/\//i.test(url)) {
+      const src = { id: randomUUID(), name: label, url, addedAt: Date.now(), count: 0 };
+      // Validate before saving; the parsed result seeds the rebuild (no second download).
+      const items = await fetchSource(src);
+      src.lastFetched = Date.now();
+      lastGood.set(src.id, items);
       sources.push(src);
     } else {
       return res.status(400).json({ error: 'provide a valid url or playlist text' });
     }
-    await rebuildCustom();
-    res.json({ sources: sources.map(publicSrc) });
   } catch (e) {
-    res.status(400).json({ error: `could not import: ${String(e?.message || e)}` });
+    return res.status(400).json({ error: `could not import: ${String(e?.message || e)}` });
   }
-});
+  await rebuildCustom();
+  ensureRefreshTimer();
+  res.json({ sources: sources.map(adminSrc) });
+}));
 
-sourcesAdminRouter.delete('/sources/:id', async (req, res) => {
+sourcesAdminRouter.delete('/sources/:id', wrap(async (req, res) => {
   const before = sources.length;
   sources = sources.filter((s) => s.id !== req.params.id);
   if (sources.length === before) return res.status(404).json({ error: 'not found' });
+  lastGood.delete(req.params.id);
   await rebuildCustom();
-  res.json({ sources: sources.map(publicSrc) });
-});
+  res.json({ sources: sources.map(adminSrc) });
+}));
 
-sourcesAdminRouter.post('/sources/refresh', async (_req, res) => {
-  const n = await rebuildCustom();
-  res.json({ count: n, sources: sources.map(publicSrc) });
-});
+sourcesAdminRouter.post('/sources/refresh', wrap(async (_req, res) => {
+  const n = await rebuildCustom(true);
+  res.json({ count: n, sources: sources.map(adminSrc) });
+}));

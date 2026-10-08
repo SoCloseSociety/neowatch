@@ -12,6 +12,39 @@ import { rateLimit } from './ratelimit.js';
 const DUMMY_HASH = bcrypt.hashSync('neowatch-timing-guard', 10);
 
 const authLimit = rateLimit({ windowMs: 60_000, max: 30, name: 'auth' });
+// Roaming writes (favorites, mosaic, prefs): generous for a household behind one NAT,
+// low enough that a script cannot make every save() re-serialize the store in a loop.
+const syncLimit = rateLimit({ windowMs: 60_000, max: 60, name: 'sync' });
+
+// Express 4 does not catch a rejected async handler: the request hangs and the error
+// surfaces as an unhandledRejection. Every async route goes through this instead.
+const wrap = (fn) => (req, res, next) =>
+  Promise.resolve(fn(req, res, next)).catch((e) => {
+    console.error('[auth] route failed:', e?.code || '', e?.message || e);
+    if (!res.headersSent) res.status(500).json({ error: 'internal error' });
+  });
+
+// Input shapes. Anything that is not a string of a sane size is refused before it
+// reaches bcrypt (a non-string password made bcrypt reject and the request hang) or
+// the store (an object name was persisted and echoed back).
+const EMAIL_MAX = 254;
+const NAME_MAX = 60;
+const PW_MIN = 6;
+const PW_MAX = 128; // bcrypt only reads the first 72 bytes; refuse what would be silently cut
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const cleanEmail = (v) => {
+  if (typeof v !== 'string') return null;
+  const e = v.toLowerCase().trim();
+  return e.length <= EMAIL_MAX && EMAIL_RE.test(e) ? e : null;
+};
+const validPassword = (v) => typeof v === 'string' && v.length >= PW_MIN && v.length <= PW_MAX;
+// Optional display name: undefined/'' -> fallback, a string -> trimmed + capped, anything else -> invalid.
+const cleanName = (v, fallback) => {
+  if (v === undefined || v === null || v === '') return (fallback || '').slice(0, NAME_MAX);
+  if (typeof v !== 'string') return null;
+  return v.trim().slice(0, NAME_MAX) || (fallback || '').slice(0, NAME_MAX);
+};
+const PW_ERROR = `password must be ${PW_MIN} to ${PW_MAX} characters`;
 
 // Lightweight, dependency-free user store (JSON file). Plenty for a
 // localhost / small-VPS deployment with a handful of friends. Swap for a
@@ -31,16 +64,20 @@ async function load() {
 }
 
 // Serialize writes (no interleaving) and write atomically (temp file + rename)
-// so a crash mid-write can never truncate users.json.
+// so a crash mid-write can never truncate users.json. The caller gets this write's
+// outcome, but the queue itself never stays rejected: one failed write (ENOSPC,
+// EACCES) must not skip every later save. Compact JSON: the whole store is
+// re-serialized on each write.
 let writeChain = Promise.resolve();
 function save() {
-  writeChain = writeChain.then(async () => {
+  const p = writeChain.then(async () => {
     await mkdir(config.dataDir, { recursive: true }).catch(() => {});
     const tmp = `${USERS_FILE}.${randomUUID()}.tmp`;
-    await writeFile(tmp, JSON.stringify(users, null, 2));
+    await writeFile(tmp, JSON.stringify(users));
     await rename(tmp, USERS_FILE);
   });
-  return writeChain;
+  writeChain = p.catch(() => {});
+  return p;
 }
 
 const sanitize = (u) => ({
@@ -52,6 +89,11 @@ const sanitize = (u) => ({
   plan: u.plan || 'free',
   planExpires: u.planExpires || null,
   premium: isPremium(u),
+  // Where the plan came from (mock | stripe | admin; null on legacy records) and whether
+  // it was cancelled: premium then stays on until planExpires, nothing renews it (only
+  // meaningful while premium: an expired plan is simply free).
+  planSource: u.planSource || null,
+  cancelAtPeriodEnd: !!u.cancelAtPeriodEnd && isPremium(u),
   createdAt: u.createdAt,
   favorites: u.favorites || [],
   // Multi-screen mosaic config, roams across devices (set it on your computer,
@@ -79,17 +121,50 @@ export async function setStripeCustomer(user, customerId) {
   await save();
 }
 
-// Set a user's plan. For premium, expiry = explicit expiresAt (ms, e.g. Stripe
-// current_period_end) if given, else now + days, else null (lifetime).
-export async function setPlan(user, plan, days, expiresAt) {
-  user.plan = plan === 'premium' ? 'premium' : 'free';
-  if (user.plan === 'premium') {
-    user.planExpires = expiresAt || (days ? Date.now() + days * 86400000 : null);
-  } else {
-    user.planExpires = null;
+// Apply a plan and/or billing fields in ONE persisted write (the Stripe webhook must
+// learn whether it stuck: a failed save is a 500 so Stripe retries).
+//  - plan: 'premium' | 'free' (omit to leave the plan alone). For premium, expiry =
+//    explicit expiresAt (ms, e.g. Stripe period end) if given, else now + days, else
+//    null (lifetime). source = 'mock' | 'stripe' | 'admin'.
+//  - any of BILLING_FIELDS: Stripe ids, event ordering stamp, cancel-at-period-end.
+const BILLING_FIELDS = ['stripeCustomerId', 'stripeSubscriptionId', 'stripeEventAt', 'cancelAtPeriodEnd'];
+export async function updateBilling(user, { plan, days, expiresAt, source, ...fields } = {}) {
+  if (plan !== undefined) {
+    user.plan = plan === 'premium' ? 'premium' : 'free';
+    if (user.plan === 'premium') {
+      user.planExpires = expiresAt || (days ? Date.now() + days * 86400000 : null);
+    } else {
+      user.planExpires = null;
+    }
+    user.planSource = source || null;
+    // A new grant or a downgrade both end any pending cancellation, unless the caller
+    // states it (a Stripe subscription can be active AND set to cancel).
+    if (!('cancelAtPeriodEnd' in fields)) user.cancelAtPeriodEnd = false;
+  }
+  for (const k of BILLING_FIELDS) {
+    if (!(k in fields)) continue;
+    if (fields[k] === null || fields[k] === undefined) delete user[k];
+    else user[k] = fields[k];
   }
   await save();
   return sanitize(user);
+}
+
+// Set a user's plan (see updateBilling for the expiry rules).
+export function setPlan(user, plan, days, expiresAt, source) {
+  return updateBilling(user, { plan, days, expiresAt, source });
+}
+
+// Hooks run before an account is removed (self-service or admin). billing.js uses it to
+// cancel a live Stripe subscription: deleting the account must stop the charges. A hook
+// that throws aborts the deletion (the caller answers 502), so nothing keeps billing a
+// user who no longer exists.
+const deleteHooks = [];
+export function onBeforeUserDelete(fn) {
+  deleteHooks.push(fn);
+}
+async function runDeleteHooks(user) {
+  for (const fn of deleteHooks) await fn(user);
 }
 
 export { sanitize };
@@ -286,35 +361,39 @@ function sanitizePrefs(p) {
   };
 }
 
+// Mounted at /api: no-store sits on its own routes only. A router-level use() would run
+// for EVERY /api request mounted after it (catalog, epg, films...) and mark them all
+// private, no-store.
 export const prefsRouter = Router();
-prefsRouter.use(privateNoStore);
 // Read prefs: any logged-in user (free sees their stored prefs or empty).
-prefsRouter.get('/me/prefs', requireUser, (req, res) => res.json({ prefs: req.user.prefs || null }));
+prefsRouter.get('/me/prefs', privateNoStore, requireUser, (req, res) => res.json({ prefs: req.user.prefs || null }));
 // Write prefs: premium feature.
-prefsRouter.put('/me/prefs', requirePremium, async (req, res) => {
+prefsRouter.put('/me/prefs', privateNoStore, syncLimit, requirePremium, wrap(async (req, res) => {
   req.user.prefs = sanitizePrefs(req.body?.prefs || {});
   await save();
   res.json({ prefs: req.user.prefs });
-});
+}));
 
 export const authRouter = Router();
 // Everything under /api/auth is about one account (and login/register/device-poll carry a
 // token in the body): never cacheable.
 authRouter.use(privateNoStore);
 
-authRouter.post('/register', authLimit, async (req, res) => {
+authRouter.post('/register', authLimit, wrap(async (req, res) => {
   if (!config.allowRegister) return res.status(403).json({ error: 'registration disabled' });
   const { email, password, name } = req.body || {};
-  if (!email || !password || password.length < 6) {
-    return res.status(400).json({ error: 'email and password (min 6 chars) required' });
+  const norm = cleanEmail(email);
+  if (!norm || !validPassword(password)) {
+    return res.status(400).json({ error: `a valid email and a ${PW_MIN} to ${PW_MAX} character password are required` });
   }
-  const norm = String(email).toLowerCase().trim();
+  const displayName = cleanName(name, norm.split('@')[0]);
+  if (displayName === null) return res.status(400).json({ error: 'name must be text' });
   if (users.some((u) => u.email === norm)) return res.status(409).json({ error: 'email already registered' });
 
   const user = {
     id: randomUUID(),
     email: norm,
-    name: name || norm.split('@')[0],
+    name: displayName,
     role: 'user',
     status: 'active',
     plan: 'free',
@@ -329,26 +408,48 @@ authRouter.post('/register', authLimit, async (req, res) => {
   users.push(user);
   await save();
   res.json({ token: sign(user), user: sanitize(user) });
-});
+}));
 
-authRouter.post('/login', authLimit, async (req, res) => {
+authRouter.post('/login', authLimit, wrap(async (req, res) => {
   const { email, password } = req.body || {};
-  const norm = String(email || '').toLowerCase().trim();
+  // Wrong types or absurd sizes can never match an account: same answer as a bad password.
+  if (typeof email !== 'string' || typeof password !== 'string' || email.length > EMAIL_MAX || password.length > PW_MAX) {
+    return res.status(401).json({ error: 'invalid credentials' });
+  }
+  const norm = email.toLowerCase().trim();
   const user = users.find((u) => u.email === norm);
   // Always run a comparison (dummy hash for unknown emails) to avoid timing enumeration.
-  const ok = await bcrypt.compare(String(password || ''), user?.passwordHash || DUMMY_HASH);
+  const ok = await bcrypt.compare(password, user?.passwordHash || DUMMY_HASH);
   if (!user || !ok) {
     return res.status(401).json({ error: 'invalid credentials' });
   }
   if (user.status !== 'active') return res.status(403).json({ error: 'account disabled' });
   res.json({ token: sign(user), user: sanitize(user) });
-});
+}));
 
 // Called by the app at every start (web, TV). `token` is present only when the
 // session was just renewed; the client then replaces its stored token.
 authRouter.get('/me', authenticate, (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'not authenticated' });
   res.json({ user: sanitize(req.user), ...(req.renewedToken ? { token: req.renewedToken } : {}) });
+});
+
+// GDPR access + portability: everything stored about this account, machine-readable,
+// as a download. Never the password hash nor the session generation.
+authRouter.get('/me/export', authenticate, requireUser, (req, res) => {
+  const u = req.user;
+  const out = {
+    exportedAt: new Date().toISOString(),
+    service: 'NEOWATCH',
+    account: { ...sanitize(u), lastStripeEventAt: u.stripeEventAt || null },
+    prefs: u.prefs || null,
+    billing: {
+      stripeCustomerId: u.stripeCustomerId || null,
+      stripeSubscriptionId: u.stripeSubscriptionId || null,
+    },
+  };
+  res.setHeader('Content-Disposition', 'attachment; filename="neowatch-my-data.json"');
+  res.json(out);
 });
 
 // ── Device pairing: log a TV in by scanning a QR with an already-signed-in phone ──
@@ -358,13 +459,16 @@ authRouter.get('/me', authenticate, (req, res) => {
 // goes to whoever holds the secret deviceCode (the TV), so a guessed userCode can't
 // steal a session -- it can at most attach the approver's own account to that TV.
 const PAIR_TTL_MS = 10 * 60 * 1000;
-const pairings = new Map();          // deviceCode -> { userCode, status, userId, tv, expiresAt }
+const PAIR_MAX = 5000;  // live pairings, all clients
+const PAIR_PER_IP = 5;  // live pairings per client IP (a TV needs one)
+const pairings = new Map();          // deviceCode -> { userCode, status, userId, tv, expiresAt, ip }
 const pairingByUserCode = new Map(); // userCode   -> deviceCode
 // Called by revokeTokens(): an approved-but-unpolled pairing is a token in reserve.
 function dropPairingsOf(userId) {
   for (const [dc, p] of pairings) if (p.userId === userId) { pairings.delete(dc); pairingByUserCode.delete(p.userCode); }
 }
 const deviceStartLimit = rateLimit({ windowMs: 60_000, max: 20, name: 'device-start' });
+const deviceInfoLimit = rateLimit({ windowMs: 60_000, max: 30, name: 'device-info' });
 const devicePollLimit = rateLimit({ windowMs: 60_000, max: 150, name: 'device-poll' });
 const USERCODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L ambiguity
 function genUserCode() {
@@ -377,15 +481,29 @@ function sweepPairings() {
   const now = Date.now();
   for (const [dc, p] of pairings) if (p.expiresAt < now) { pairings.delete(dc); pairingByUserCode.delete(p.userCode); }
 }
+function dropPairing(dc) {
+  const p = pairings.get(dc);
+  if (p) { pairings.delete(dc); pairingByUserCode.delete(p.userCode); }
+}
 
 // TV: request a pairing. Returns the secret deviceCode + the short userCode to display.
-authRouter.post('/device/start', deviceStartLimit, (_req, res) => {
+// Room is made by evicting instead of refusing: one client holds at most PAIR_PER_IP live
+// pairings (its own oldest goes first), and at the global cap the oldest pending pairing
+// goes. A handful of clients can no longer fill the pool and lock TV sign-in for everyone.
+authRouter.post('/device/start', deviceStartLimit, (req, res) => {
   sweepPairings();
-  if (pairings.size > 5000) return res.status(503).json({ error: 'busy, try again' });
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const mine = [];
+  for (const [dc, p] of pairings) if (p.ip === ip && p.status === 'pending') mine.push(dc); // Map order = oldest first
+  while (mine.length >= PAIR_PER_IP) dropPairing(mine.shift());
+  if (pairings.size >= PAIR_MAX) {
+    for (const [dc, p] of pairings) if (p.status === 'pending') { dropPairing(dc); break; }
+    if (pairings.size >= PAIR_MAX) return res.status(503).json({ error: 'busy, try again' });
+  }
   let userCode = genUserCode();
   while (pairingByUserCode.has(userCode)) userCode = genUserCode();
   const deviceCode = randomBytes(24).toString('base64url');
-  pairings.set(deviceCode, { userCode, status: 'pending', userId: null, expiresAt: Date.now() + PAIR_TTL_MS });
+  pairings.set(deviceCode, { userCode, status: 'pending', userId: null, expiresAt: Date.now() + PAIR_TTL_MS, ip });
   pairingByUserCode.set(userCode, deviceCode);
   res.json({ deviceCode, userCode, expiresIn: Math.floor(PAIR_TTL_MS / 1000) });
 });
@@ -409,7 +527,7 @@ authRouter.post('/device/poll', devicePollLimit, (req, res) => {
 });
 
 // Phone: is this code valid + waiting? (for the confirm UI)
-authRouter.get('/device/info', (req, res) => {
+authRouter.get('/device/info', deviceInfoLimit, (req, res) => {
   sweepPairings();
   const dc = pairingByUserCode.get(String(req.query.code || '').toUpperCase().trim());
   const rec = dc ? pairings.get(dc) : null;
@@ -428,33 +546,73 @@ authRouter.post('/device/approve', authLimit, authenticate, requireUser, (req, r
   res.json({ ok: true });
 });
 
+// Roaming payload shapes. Favorites key on the stream url (stable across catalog
+// rebuilds), so they are plain url strings. A mosaic tile keeps only the stable fields of
+// a channel: never proxyUrl (a signed URL that expires in 2h) nor volatile health data.
+const URL_MAX = 2048;
+const isUrl = (v) => typeof v === 'string' && v.length > 0 && v.length <= URL_MAX && /^https?:\/\//i.test(v);
+const optStr = (v, max) => (typeof v === 'string' && v ? v.slice(0, max) : null);
+const strList = (v, n, max) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, n).map((x) => x.slice(0, max)) : []);
+function cleanTile(c) {
+  if (!c || typeof c !== 'object' || Array.isArray(c) || !isUrl(c.url)) return null;
+  const tile = {
+    id: optStr(c.id, 40) || '',
+    channelId: optStr(c.channelId, 120),
+    name: optStr(c.name, 200) || 'Channel',
+    url: c.url,
+    kind: ['hls', 'youtube', 'dash', 'other'].includes(c.kind) ? c.kind : 'other',
+    quality: optStr(c.quality, 16),
+    label: optStr(c.label, 60),
+    userAgent: optStr(c.userAgent, 300),
+    referrer: optStr(c.referrer, URL_MAX),
+    categories: strList(c.categories, 12, 40),
+    categoryNames: strList(c.categoryNames, 12, 60),
+    country: optStr(c.country, 8),
+    countryName: optStr(c.countryName, 80),
+    flag: optStr(c.flag, 16),
+    languages: strList(c.languages, 12, 8),
+    languageNames: strList(c.languageNames, 12, 60),
+    website: isUrl(c.website) ? c.website : null,
+    nsfw: !!c.nsfw,
+  };
+  if (isUrl(c.logo)) tile.logo = c.logo;
+  if (c.tier === 'free' || c.tier === 'premium') tile.tier = c.tier;
+  if (c.source === 'iptv-org' || c.source === 'custom') tile.source = c.source;
+  if (Array.isArray(c.alternates)) {
+    tile.alternates = c.alternates
+      .filter((a) => a && isUrl(a.url))
+      .slice(0, 8)
+      .map((a) => ({ url: a.url, proxyUrl: null, userAgent: optStr(a.userAgent, 300), referrer: optStr(a.referrer, URL_MAX) }));
+  }
+  return tile;
+}
+
 // Persist a user's favorites server-side (so they roam across devices).
-authRouter.put('/favorites', authenticate, requireUser, async (req, res) => {
+authRouter.put('/favorites', syncLimit, authenticate, requireUser, wrap(async (req, res) => {
   const { favorites } = req.body || {};
   if (!Array.isArray(favorites)) return res.status(400).json({ error: 'favorites must be an array' });
-  req.user.favorites = favorites.slice(0, 1000);
+  req.user.favorites = [...new Set(favorites.filter(isUrl))].slice(0, 1000);
   await save();
   res.json({ favorites: req.user.favorites });
-});
+}));
 
 // Persist the multi-screen mosaic config server-side, so it roams across devices
-// (configure on a computer, pick it up on the TV). Stores the channel objects, capped.
-authRouter.put('/multi', authenticate, requireUser, async (req, res) => {
+// (configure on a computer, pick it up on the TV). Stores sanitized tiles, capped.
+authRouter.put('/multi', syncLimit, authenticate, requireUser, wrap(async (req, res) => {
   const { multi } = req.body || {};
   if (!Array.isArray(multi)) return res.status(400).json({ error: 'multi must be an array' });
-  req.user.multi = multi
-    .filter((c) => c && typeof c === 'object' && typeof c.url === 'string')
-    .slice(0, 9);
+  req.user.multi = multi.slice(0, 9).map(cleanTile).filter(Boolean);
   await save();
   res.json({ multi: req.user.multi });
-});
+}));
 
 // Self-service password change.
-authRouter.put('/password', authLimit, authenticate, requireUser, async (req, res) => {
+authRouter.put('/password', authLimit, authenticate, requireUser, wrap(async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
-  if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'new password too short (min 6)' });
+  if (!validPassword(newPassword)) return res.status(400).json({ error: `new ${PW_ERROR}` });
+  if (typeof currentPassword !== 'string') return res.status(401).json({ error: 'current password is incorrect' });
   const verifiedAgainst = req.user.passwordHash;
-  if (!(await bcrypt.compare(String(currentPassword || ''), verifiedAgainst))) {
+  if (!(await bcrypt.compare(currentPassword, verifiedAgainst))) {
     return res.status(401).json({ error: 'current password is incorrect' });
   }
   const newHash = await bcrypt.hash(newPassword, 10);
@@ -475,23 +633,30 @@ authRouter.put('/password', authLimit, authenticate, requireUser, async (req, re
   await save();
   handToken(req, res, fresh);
   res.json({ ok: true, token: fresh });
-});
+}));
 
 // GDPR: self-service account deletion (password-confirmed). Removes the account
 // and everything attached to it (favorites, multi config, plan). The last admin
 // cannot self-delete (would lock the instance).
-authRouter.delete('/me', authLimit, authenticate, requireUser, async (req, res) => {
+authRouter.delete('/me', authLimit, authenticate, requireUser, wrap(async (req, res) => {
   const { password } = req.body || {};
-  if (!(await bcrypt.compare(String(password || ''), req.user.passwordHash))) {
+  if (typeof password !== 'string' || password.length > PW_MAX || !(await bcrypt.compare(password, req.user.passwordHash))) {
     return res.status(401).json({ error: 'password is incorrect' });
   }
   if (req.user.role === 'admin' && users.filter((u) => u.role === 'admin').length <= 1) {
     return res.status(400).json({ error: 'cannot delete the last admin account' });
   }
-  users = users.filter((u) => u.id !== req.user.id);
+  try {
+    await runDeleteHooks(req.user);
+  } catch {
+    return res.status(502).json({ error: 'could not cancel the subscription, try again' });
+  }
+  const gone = req.user;
+  users = users.filter((u) => u.id !== gone.id);
+  dropPairingsOf(gone.id);
   await save();
   res.json({ ok: true });
-});
+}));
 
 // ── Admin user management ──────────────────────────────────────
 export const adminRouter = Router();
@@ -500,17 +665,19 @@ adminRouter.get('/users', (_req, res) => {
   res.json({ users: users.map(sanitize) });
 });
 
-adminRouter.post('/users', async (req, res) => {
+adminRouter.post('/users', wrap(async (req, res) => {
   const { email, password, name, role } = req.body || {};
-  if (!email || !password || password.length < 6) {
-    return res.status(400).json({ error: 'email and password (min 6 chars) required' });
+  const norm = cleanEmail(email);
+  if (!norm || !validPassword(password)) {
+    return res.status(400).json({ error: `a valid email and a ${PW_MIN} to ${PW_MAX} character password are required` });
   }
-  const norm = String(email).toLowerCase().trim();
+  const displayName = cleanName(name, norm.split('@')[0]);
+  if (displayName === null) return res.status(400).json({ error: 'name must be text' });
   if (users.some((u) => u.email === norm)) return res.status(409).json({ error: 'email already exists' });
   const user = {
     id: randomUUID(),
     email: norm,
-    name: name || norm.split('@')[0],
+    name: displayName,
     role: role === 'admin' ? 'admin' : 'user',
     status: 'active',
     plan: role === 'admin' ? 'premium' : 'free',
@@ -522,12 +689,16 @@ adminRouter.post('/users', async (req, res) => {
   users.push(user);
   await save();
   res.json({ user: sanitize(user) });
-});
+}));
 
-adminRouter.patch('/users/:id', async (req, res) => {
+adminRouter.patch('/users/:id', wrap(async (req, res) => {
   const user = users.find((u) => u.id === req.params.id);
   if (!user) return res.status(404).json({ error: 'not found' });
-  const { role, status, name, password } = req.body || {};
+  const { role, status, name } = req.body || {};
+  // '' / absent = no reset; anything else must be a valid password (no silent ignore).
+  const password = req.body?.password === '' || req.body?.password == null ? null : req.body.password;
+  if (password !== null && !validPassword(password)) return res.status(400).json({ error: PW_ERROR });
+  if (name !== undefined && name !== null && typeof name !== 'string') return res.status(400).json({ error: 'name must be text' });
 
   // Never let the last active admin be demoted or disabled (lock-out guard).
   const activeAdmins = users.filter((u) => u.role === 'admin' && u.status === 'active');
@@ -539,11 +710,11 @@ adminRouter.patch('/users/:id', async (req, res) => {
 
   if (role && ['user', 'admin'].includes(role)) user.role = role;
   if (status && ['active', 'disabled'].includes(status)) user.status = status;
-  if (name) user.name = name;
-  if (password && password.length >= 6) user.passwordHash = await bcrypt.hash(password, 10);
+  if (name && name.trim()) user.name = name.trim().slice(0, NAME_MAX);
+  if (password) user.passwordHash = await bcrypt.hash(password, 10);
   // Disabling or resetting the password also kills the sessions already issued
   // (re-enabling later requires a fresh login).
-  if (status === 'disabled' || (password && password.length >= 6)) {
+  if (status === 'disabled' || password) {
     revokeTokens(user);
     // An admin resetting their OWN password from the admin panel keeps this device signed
     // in (same contract as PUT /auth/password). Disabling yourself does sign you out.
@@ -551,16 +722,22 @@ adminRouter.patch('/users/:id', async (req, res) => {
   }
   await save();
   res.json({ user: sanitize(user) });
-});
+}));
 
-adminRouter.delete('/users/:id', async (req, res) => {
+adminRouter.delete('/users/:id', wrap(async (req, res) => {
   if (req.user?.id === req.params.id) return res.status(400).json({ error: 'cannot delete yourself' });
-  const before = users.length;
-  users = users.filter((u) => u.id !== req.params.id);
-  if (users.length === before) return res.status(404).json({ error: 'not found' });
+  const target = users.find((u) => u.id === req.params.id);
+  if (!target) return res.status(404).json({ error: 'not found' });
+  try {
+    await runDeleteHooks(target);
+  } catch {
+    return res.status(502).json({ error: 'could not cancel the subscription, try again' });
+  }
+  users = users.filter((u) => u.id !== target.id);
+  dropPairingsOf(target.id);
   await save();
   res.json({ ok: true });
-});
+}));
 
 export function getStats() {
   return {
