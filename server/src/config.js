@@ -167,7 +167,7 @@ export function validateConfig() {
   }
   if (!(Number(config.premiumPrice) > 0)) add('warn', 'PREMIUM_PRICE', 'Not a positive number.');
   if (!config.premiumCategories.length) add('info', 'PREMIUM_CATEGORIES', 'Empty: every channel is free.');
-  if (config.allowPrivateSources) add('warn', 'ALLOW_PRIVATE_SOURCES', 'Enabled: SSRF guard is bypassed for admin source/EPG fetches and the streams of custom (M3U) sources.');
+  if (config.allowPrivateSources) add('warn', 'ALLOW_PRIVATE_SOURCES', 'Enabled: SSRF guard is bypassed for admin source/EPG fetches and the streams and logos of custom (M3U) sources.');
   // Removed setting (it never gated anything): say so instead of failing silently.
   if (process.env.ACCESS_PASSWORD) add('warn', 'ACCESS_PASSWORD', 'No longer supported (it never gated anything). Use REQUIRE_AUTH=true + ALLOW_REGISTER=false to close an instance.');
   if ((config.isProd || config.requireAuth) && !config.allowedOrigins.length && config.trustProxy === false) {

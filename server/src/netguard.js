@@ -137,17 +137,20 @@ const guardedAgent = new Agent({
 
 // SSRF-safe fetch: re-validates EVERY redirect hop and pins the connect-time DNS
 // resolution. Use this for any user-influenced URL instead of fetch(redirect:'follow').
-// allowPrivate skips the guard (trusted LAN providers, opt-in only).
-export async function safeFetch(url, init = {}, { maxHops = 5, allowPrivate = false } = {}) {
+// allowPrivate skips the guard (trusted LAN providers, opt-in only). privateHost
+// (a URL `host`, e.g. "192.168.1.5:9981") skips it for that one host only: a hop
+// that redirects anywhere else is guarded again.
+export async function safeFetch(url, init = {}, { maxHops = 5, allowPrivate = false, privateHost = null } = {}) {
   let current = url;
   let res;
   for (let hop = 0; hop <= maxHops; hop++) {
     if (!/^https?:\/\//i.test(current)) throw new Error('blocked scheme');
-    if (!allowPrivate) await assertPublicHost(current);
+    const open = allowPrivate || (!!privateHost && new URL(current).host === privateHost);
+    if (!open) await assertPublicHost(current);
     res = await uFetch(current, {
       ...init,
       redirect: 'manual',
-      ...(allowPrivate ? {} : { dispatcher: guardedAgent }),
+      ...(open ? {} : { dispatcher: guardedAgent }),
     });
     if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
       // Drain the redirect body or the socket stays checked-out of the pool.

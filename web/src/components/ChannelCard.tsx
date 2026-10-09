@@ -7,6 +7,7 @@ import { LOCALES, fmtTime, useT, type Lang } from '@/lib/i18n';
 import { useUI } from '@/store/uiStore';
 import type { PlayOptions } from '@/store/playerStore';
 import { HealthPill, Pill } from './ui';
+import { imgSrc } from '@/lib/img';
 
 // One card = one button = one action (spec 2.4): click, OK, Enter and Space all
 // play (a locked custom-playlist channel opens Pricing). No inner controls: the
@@ -126,7 +127,7 @@ export const ChannelCard = memo(function ChannelCard({ channel: ch, health, onPl
       <span className="card-surface flex w-full items-center justify-center bg-[var(--bg-3)] pb-2 pt-[calc(var(--pastille-h)_+_10px)]">
         {ch.logo && !imgFailed ? (
           <img
-            src={ch.logo}
+            src={imgSrc(ch.logo)}
             alt=""
             width={160}
             height={90}

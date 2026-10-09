@@ -32,6 +32,7 @@ const SUITES = {
   contract: { file: 'contract-test.mjs' },
   integration: { file: 'integration-test.mjs' },
   proxy: { file: 'proxy-test.mjs', upstream: 'UPSTREAM_PORT' },
+  img: { file: 'img-test.mjs', upstream: 'UPSTREAM_PORT' },
   account: { file: 'account-test.mjs', env: { S3_MODE: 'dev' }, ports: ['FEED_PORT', 'STRIPE_PORT'], dataDir: true },
   catalog: { file: 'catalog-test.mjs', env: { MODE: 'live' }, dataDir: true },
   session: {

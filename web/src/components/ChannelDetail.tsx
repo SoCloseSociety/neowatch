@@ -10,7 +10,7 @@ import { usePlayer } from '@/store/playerStore';
 import { useCatalog } from '@/store/catalogStore';
 import { useUI, toast } from '@/store/uiStore';
 import { useT, fmtTime, fmtAge } from '@/lib/i18n';
-import { Button, Data, EmptyState, HealthPill, Meta, Overline, Pill, Spinner, btnClass } from './ui';
+import { Button, Data, EmptyState, HealthPill, LogoImg, Meta, Overline, Pill, Spinner, btnClass } from './ui';
 import { LEGAL_CONTACT } from './Legal';
 import { countryLabel, languageLabel } from './ChannelCard';
 import { isTV } from '@/lib/device';
@@ -191,7 +191,7 @@ export function ChannelDetail() {
             </button>
             <div className="flex flex-wrap items-end gap-6">
               <div className="grid h-20 w-32 shrink-0 sm:h-28 sm:w-44 place-items-center overflow-hidden rounded-card border border-line bg-card" aria-hidden="true">
-                {ch.logo ? <img src={ch.logo} alt="" referrerPolicy="no-referrer" className="max-h-[70%] max-w-[80%] object-contain" /> : <Radio className="text-ink-3" size={40} />}
+                <LogoImg key={ch.logo || ''} src={ch.logo} width={176} height={112} fallback={<Radio className="text-ink-3" size={40} />} className="max-h-[70%] max-w-[80%] object-contain" />
               </div>
               <div className="flex min-w-0 flex-1 basis-[320px] flex-col gap-3">
                 <div className="flex flex-wrap items-center gap-2.5">
@@ -311,11 +311,7 @@ export function ChannelDetail() {
                   {/* Positioned plate: the logo's % caps resolve against the 16:9 box, so a
                       tall logo can never stretch one card above its row. */}
                   <span className="relative block aspect-video bg-mini" aria-hidden="true">
-                    {s.logo ? (
-                      <img src={s.logo} alt="" loading="lazy" referrerPolicy="no-referrer" className="absolute inset-0 m-auto max-h-[60%] max-w-[72%] object-contain" />
-                    ) : (
-                      <Radio className="absolute inset-0 m-auto text-ink-3" />
-                    )}
+                    <LogoImg src={s.logo} width={144} height={81} loading="lazy" fallback={<Radio className="absolute inset-0 m-auto text-ink-3" />} className="absolute inset-0 m-auto max-h-[60%] max-w-[72%] object-contain" />
                   </span>
                   <span className="block truncate px-3 py-2 text-sous font-semibold text-ink" translate="no">{s.name}</span>
                 </button>

@@ -15,6 +15,7 @@ import { sourcesPublicRouter, sourcesAdminRouter, initSources } from './sources.
 import { epgPublicRouter, epgAdminRouter, initEpg, epgEnabled, hasEpg, epgDay, epgChannelIds } from './epg.js';
 import { filmsRouter } from './films.js';
 import { radioRouter } from './radio.js';
+import { imgRouter } from './img.js';
 import { billingPublicRouter, billingUserRouter, billingAdminRouter, stripeWebhookHandler, checkoutAvailable } from './billing.js';
 import { rateLimit } from './ratelimit.js';
 import {
@@ -77,6 +78,12 @@ if (config.allowedOrigins.length) {
     return config.allowedOrigins.includes(req.headers.origin) ? corsMw(req, res, next) : next();
   });
 }
+// ── Logo relay ─────────────────────────────────────────────────
+// Before authenticate AND every gate: an <img> sends no Authorization, the relay only
+// fetches URLs the server itself vends (catalog logos, radio favicons), and its public
+// 24 h cache must never carry a renewed session token (img.js).
+app.use('/api', imgRouter);
+
 app.use(authenticate); // populates req.user when a token is sent
 
 // ── Stream proxy ───────────────────────────────────────────────

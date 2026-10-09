@@ -7,6 +7,7 @@ import { useT } from '@/lib/i18n';
 import { AdBanner } from './AdBanner';
 import { countryLabel } from './ChannelCard';
 import { Button, EmptyState, Spinner } from './ui';
+import { imgSrc } from '@/lib/img';
 
 interface Station {
   id: string;
@@ -241,7 +242,7 @@ export function Radios() {
                   >
                     <span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-field bg-mini" aria-hidden="true">
                       {s.favicon && !noIcon.has(s.id) ? (
-                        <img src={s.favicon} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-contain"
+                        <img src={imgSrc(s.favicon)} alt="" width={48} height={48} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-contain"
                           onError={() => setNoIcon((x) => new Set(x).add(s.id))} />
                       ) : (
                         <RadioTower size={18} className="text-ink-3" />

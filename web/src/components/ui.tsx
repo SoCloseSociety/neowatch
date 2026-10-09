@@ -1,7 +1,8 @@
 import { clsx } from 'clsx';
-import { useEffect, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useState, type ButtonHTMLAttributes, type ImgHTMLAttributes, type ReactNode } from 'react';
 import type { HealthStatus } from '@/types';
 import { useT } from '@/lib/i18n';
+import { imgSrc } from '@/lib/img';
 import { useUI } from '@/store/uiStore';
 
 // Design primitives (Sentinel TV OS, DESIGN-SPEC sections 1.2 and 2.9-2.11).
@@ -9,6 +10,15 @@ import { useUI } from '@/store/uiStore';
 // .toast). Data (channel names, countries, programme titles) is marked
 // translate="no" so the browser never translates it and the verifier knows it
 // is not UI copy.
+
+/** A third-party logo through the image relay (lib/img.ts); `fallback` when there is
+ *  none or it fails to load (404, refused, not an image). */
+export function LogoImg({ src, fallback, ...rest }: { src: string | null | undefined; fallback: ReactNode } & Omit<ImgHTMLAttributes<HTMLImageElement>, 'src' | 'onError'>) {
+  const url = imgSrc(src);
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!url || failed === url) return <>{fallback}</>;
+  return <img alt="" decoding="async" referrerPolicy="no-referrer" {...rest} src={url} onError={() => setFailed(url)} />;
+}
 
 // Close a modal on Escape (call before any early return to satisfy hook rules).
 export function useEscapeClose(active: boolean, onClose: () => void) {

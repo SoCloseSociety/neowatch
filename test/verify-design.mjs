@@ -407,6 +407,8 @@ async function heroContrast(page, decoder) {
       const el = n.parentElement;
       if (!el || seen.has(el) || !(n.textContent || '').trim()) continue;
       if (el.closest('button, .btn, .pill, input, kbd, svg, [data-card]')) continue;
+      // Text faded out (the TV hero collapsed once the focus is in the rows) is not read.
+      if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
       seen.add(el);
       const range = document.createRange();
       range.selectNodeContents(el);

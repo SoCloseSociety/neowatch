@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Play, Shuffle, CloudOff } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -15,6 +15,8 @@ import { Rail, ROW_MAX } from './Rail';
 import { countryLabel, languageLabel, monogram, qualityLabel, type PlayFn } from './ChannelCard';
 import { Button, CardSkeleton, EmptyState, LivePill, Meta } from './ui';
 import { insideTvShell } from './Install';
+import { imgSrc } from '@/lib/img';
+import { isTV, prefersReducedMotion } from '@/lib/device';
 
 // Home (spec 2.2, 2.3): a hero of at most 45 % of the screen so row 1 shows in
 // the first screen, then rows of 8 cards + "See all", the Browse row of
@@ -58,6 +60,19 @@ const TILES: { key: string; cat: string; art: string; apply: Partial<Filters> }[
 const STALE_MS = 30 * 60 * 1000; // signed links last 2 h; the server re-signs every 90 min
 let homeDefaultApplied = false; // prefs.home is applied once per page load (WEB-5)
 
+// TV hero (spec 2.2): 600 of the 1080 design units while the focus is in it, 320
+// once the focus moves into the rows. Transform + opacity only, never a height: the
+// whole page slides up by the difference (the hero's top goes under the header), so
+// nothing is laid out again. Back to 600 when the focus returns to the hero.
+const HERO_TV_U = 600;
+const HERO_TV_COLLAPSED_U = 320;
+const smoothOrNot = (): ScrollBehavior =>
+  prefersReducedMotion() || document.documentElement.dataset.motion === 'reduce' ? 'auto' : 'smooth';
+function scrollerOf(el: HTMLElement | null): HTMLElement | null {
+  for (let n = el?.parentElement || null; n; n = n.parentElement) if (/(auto|scroll)/.test(getComputedStyle(n).overflowY)) return n;
+  return null;
+}
+
 const railCategory = (r: HomeRail) => (r.filter?.category as string | null) || (r.filter?.foot ? 'sports' : null);
 
 export function Home({ onPlay }: { onPlay: PlayFn }) {
@@ -81,6 +96,44 @@ export function Home({ onPlay }: { onPlay: PlayFn }) {
   const [epg, setEpg] = useState<Record<string, NowNext>>({});
   const [heroKey, setHeroKey] = useState<string | null>(null);
   const loadedAt = useRef(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const collapsedRef = useRef(false);
+
+  // TV: collapse the hero when the focus enters the rows, expand it when the focus
+  // comes back to the hero, or goes up to the header while the page is at its top
+  // (spatialNav often picks the header from a row-1 card that is not under the
+  // buttons). Anything else outside Home (player, dialogs) leaves it as it is.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!isTV() || !root) return;
+    const onFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null;
+      const hero = root.querySelector<HTMLElement>('section[data-hero]');
+      const sc = scrollerOf(root);
+      if (!target || !hero || !sc) return;
+      let expand: boolean;
+      if (root.contains(target)) expand = hero.contains(target);
+      else if (!sc.contains(target) && sc.scrollTop < 2 && target.getBoundingClientRect().bottom <= sc.getBoundingClientRect().top + 1) expand = true;
+      else return;
+      if (expand === !collapsedRef.current) return;
+      collapsedRef.current = !expand;
+      setCollapsed(!expand);
+      // After spatialNav's own scrollIntoView (computed on the expanded layout): the
+      // page top is where the hero lives, and the first row fits under the collapsed one.
+      requestAnimationFrame(() => {
+        if (expand) return sc.scrollTo({ top: 0, behavior: smoothOrNot() });
+        const shift = (hero.offsetHeight * (HERO_TV_U - HERO_TV_COLLAPSED_U)) / HERO_TV_U;
+        const tf = getComputedStyle(root).transform;
+        const m = new DOMMatrixReadOnly(tf === 'none' ? undefined : tf);
+        const r = target.getBoundingClientRect();
+        const bottomAtTop = r.bottom - sc.getBoundingClientRect().top + sc.scrollTop - m.m42 - shift;
+        if (bottomAtTop <= sc.clientHeight) sc.scrollTo({ top: 0, behavior: smoothOrNot() });
+      });
+    };
+    document.addEventListener('focusin', onFocusIn);
+    return () => document.removeEventListener('focusin', onFocusIn);
+  }, []);
 
   // Home payload (localized rail titles via ?lang). A failed refresh keeps the
   // rows already shown; a failed first load shows one honest state + Retry.
@@ -211,8 +264,15 @@ export function Home({ onPlay }: { onPlay: PlayFn }) {
   const liveNowMeta = [t.n('count.channels', featured.length), t('row.pickedNow')];
 
   return (
-    <div>
-      <Hero hero={hero} now={heroNow} onWatch={() => (hero ? play(hero, { queue: featured }) : surprise())} onSurprise={surprise} />
+    <div
+      ref={rootRef}
+      // Only the transform changes (reduced motion: index.css zeroes the transition).
+      // flow-root keeps the footer's static negative margin inside this box, so the
+      // scroll length ends at the footer whether the page is slid up or not.
+      className="[:root[data-tv]_&]:flow-root [:root[data-tv]_&]:transition-transform [:root[data-tv]_&]:duration-300 [:root[data-tv]_&]:ease-out"
+      style={collapsed ? { transform: 'translateY(calc(-280 * var(--u)))' } : undefined}
+    >
+      <Hero hero={hero} now={heroNow} collapsed={collapsed} onWatch={() => (hero ? play(hero, { queue: featured }) : surprise())} onSurprise={surprise} />
 
       {/* Rows. A failed first load: one state with Retry (WEB-24). */}
       {!data && failed ? (
@@ -263,7 +323,7 @@ export function Home({ onPlay }: { onPlay: PlayFn }) {
         </>
       )}
 
-      <footer className="mt-[calc(var(--ecart-rangees)*2)] border-t border-line px-[var(--gouttiere)] pb-12 pt-10">
+      <footer className="mt-[calc(var(--ecart-rangees)*2)] border-t [:root[data-tv]_&]:mb-[calc(-280*var(--u))] border-line px-[var(--gouttiere)] pb-12 pt-10">
         <div className="flex flex-wrap gap-x-16 gap-y-10">
           <div className="max-w-[300px]">
             <div className="mb-3 flex items-center gap-2.5">
@@ -308,7 +368,7 @@ export function Home({ onPlay }: { onPlay: PlayFn }) {
 }
 
 // ── Hero ────────────────────────────────────────────────────────────────
-function Hero({ hero, now, onWatch, onSurprise }: { hero: Featured | null; now: NowNext['now']; onWatch: () => void; onSurprise: () => void }) {
+function Hero({ hero, now, collapsed, onWatch, onSurprise }: { hero: Featured | null; now: NowNext['now']; collapsed: boolean; onWatch: () => void; onSurprise: () => void }) {
   const t = useT();
   useSettings((s) => s.theme); // re-render on a style switch
   // The scrim tokens stay dark in Doux too: doubling them under the art keeps the
@@ -335,6 +395,29 @@ function Hero({ hero, now, onWatch, onSurprise }: { hero: Featured | null; now: 
     ? t('hero.liveFrom', { country })
     : t('hero.onAir');
 
+  // Collapsed (TV): the band left is the hero's lower 320 u. The title and the two
+  // buttons slide down into it (measured on the untransformed layout), everything
+  // else fades. Offsets come from offsetTop, which transforms never change.
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const metaRef = useRef<HTMLParagraphElement>(null);
+  const [shift, setShift] = useState<{ title: number; actions: number }>({ title: 0, actions: 0 });
+  useLayoutEffect(() => {
+    if (!collapsed) return;
+    const h1 = titleRef.current, actions = actionsRef.current, meta = metaRef.current;
+    if (!h1 || !actions) return;
+    const col = h1.parentElement as HTMLElement;
+    const gap = parseFloat(getComputedStyle(col).rowGap) || 0;
+    const end = (el: HTMLElement) => el.offsetTop + el.offsetHeight;
+    const toBottom = meta ? end(meta) - end(actions) : 0;
+    const toActions = actions.offsetTop - gap - end(h1);
+    setShift((s) => (s.title === toActions + toBottom && s.actions === toBottom ? s : { title: toActions + toBottom, actions: toBottom }));
+  }, [collapsed, hero?.url, sentence, q, heroLang, t.lang]);
+  // Inline, so it wins over each element's own opacity class; index.css zeroes the
+  // transitions under reduced motion (OS or in-app setting).
+  const fade: React.CSSProperties | undefined = collapsed ? { opacity: 0 } : undefined;
+  const slide = (px: number): React.CSSProperties | undefined => (collapsed ? { transform: `translateY(${px}px)` } : undefined);
+
   return (
     <section
       data-hero=""
@@ -346,10 +429,10 @@ function Hero({ hero, now, onWatch, onSurprise }: { hero: Featured | null; now: 
         {amb ? (
           <div key={amb} className="absolute inset-0 animate-fade-in bg-cover bg-center" style={{ backgroundImage: `url(${amb})` }} />
         ) : hero ? (
-          <div key={hero.url} className="absolute inset-0 flex animate-fade-in items-start justify-end p-4 sm:items-center sm:justify-center sm:p-8">
+          <div key={hero.url} className="absolute inset-0 flex animate-fade-in items-start justify-end p-4 transition-opacity duration-300 sm:items-center sm:justify-center sm:p-8" style={fade}>
             <div className="flex aspect-[520/320] w-[46%] max-w-[520px] items-center justify-center rounded-card bg-[var(--surface-carte)] shadow-[inset_0_0_0_1px_var(--line)] sm:w-[78%]">
               {hero.logo && !logoFailed ? (
-                <img src={hero.logo} alt="" width={260} height={160} decoding="async" referrerPolicy="no-referrer" onError={() => setLogoFailed(true)} className="h-auto max-h-[56%] w-auto max-w-[64%] object-contain" />
+                <img src={imgSrc(hero.logo)} alt="" width={260} height={160} decoding="async" referrerPolicy="no-referrer" onError={() => setLogoFailed(true)} className="h-auto max-h-[56%] w-auto max-w-[64%] object-contain" />
               ) : (
                 <span translate="no" className="font-mono text-titre font-semibold text-ink-2">{monogram(hero.name)}</span>
               )}
@@ -361,7 +444,7 @@ function Hero({ hero, now, onWatch, onSurprise }: { hero: Featured | null; now: 
 
       {/* Text column on the scrim: no chips behind text laid on the photo */}
       <div className="relative flex w-full max-w-[calc(620px_+_var(--gouttiere))] flex-col justify-end gap-3 px-[var(--gouttiere)] pb-[clamp(16px,3.5vh,36px)]">
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3 transition-opacity duration-300" style={fade} aria-hidden={collapsed || undefined}>
           {hero?.online === true && <LivePill pulse />}
           {hero && (
             <p className="overline m-0 min-w-0 truncate text-on-image opacity-80">
@@ -371,12 +454,12 @@ function Hero({ hero, now, onWatch, onSurprise }: { hero: Featured | null; now: 
             </p>
           )}
         </div>
-        <h1 className="text-on-image m-0 line-clamp-2 text-titre font-semibold [text-wrap:balance]" translate={hero ? 'no' : undefined}>
+        <h1 ref={titleRef} className="text-on-image m-0 line-clamp-2 text-titre font-semibold transition-transform duration-300 ease-out [text-wrap:balance]" style={slide(shift.title)} translate={hero ? 'no' : undefined}>
           {hero ? hero.name : t('home.heroEmptyTitle')}
         </h1>
-        <p className="text-on-image m-0 line-clamp-2 max-w-[520px] text-corps opacity-90">{sentence}</p>
-        {hero && <span aria-hidden="true" className="thread" />}
-        <div className="mt-1 flex flex-wrap items-center gap-2.5">
+        <p className="text-on-image m-0 line-clamp-2 max-w-[520px] text-corps opacity-90 transition-opacity duration-300" style={fade} aria-hidden={collapsed || undefined}>{sentence}</p>
+        {hero && <span aria-hidden="true" className="thread transition-opacity duration-300" style={fade} />}
+        <div ref={actionsRef} className="mt-1 flex flex-wrap items-center gap-2.5 transition-transform duration-300 ease-out" style={slide(shift.actions)}>
           <Button variant="primary" data-autofocus="" icon={<Play size={18} fill="currentColor" aria-hidden="true" />} onClick={onWatch}>
             {t('home.watch')}
           </Button>
@@ -385,7 +468,7 @@ function Hero({ hero, now, onWatch, onSurprise }: { hero: Featured | null; now: 
           </Button>
         </div>
         {hero && (q || heroLang || hero.checkedAt) && (
-          <p className="meta text-on-image m-0 opacity-75">
+          <p ref={metaRef} className="meta text-on-image m-0 opacity-75 transition-opacity duration-300" style={fade} aria-hidden={collapsed || undefined}>
             {q && <span translate="no">{q}</span>}
             {heroLang && <span translate="no">{heroLang}</span>}
             {hero.checkedAt ? <span>{t('meta.checked', { age: fmtAge(hero.checkedAt) })}</span> : null}

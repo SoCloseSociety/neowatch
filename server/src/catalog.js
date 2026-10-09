@@ -29,6 +29,9 @@ let channelIdIndex = new Map(); // normalized EPG tvg-id -> channel (O(1) lookup
 // Every stream URL in the catalog (guards the public health-check endpoint) -> the
 // catalog's own headers + origin for it (probes and the proxy never take a client's).
 let knownUrls = new Map();      // url -> { userAgent, referrer, source }
+// Every logo URL the catalog vends (guards the /api/img relay: it fetches nothing else)
+// -> { custom }: a custom (M3U) source's logo may live on the operator's LAN.
+let knownLogos = new Map();     // logo url -> { custom: boolean }
 let byId = new Map();           // primary id -> item (first in compose order wins a djb2 collision)
 let altIdIndex = new Map();     // stableId(alternate url) -> item: an id whose URL became an alternate still resolves
 let lastCollisionSig = '';      // logged once per distinct collision set, not on every compose
@@ -402,6 +405,7 @@ function compose() {
   // suffix + lowercase) to match grabber ids like "Arte.fr@SD" against "arte.fr".
   channelIdIndex = new Map();
   knownUrls = new Map();
+  knownLogos = new Map();
   byId = new Map();
   const collisions = [];
   for (const it of items) {
@@ -409,6 +413,10 @@ function compose() {
     if (it.url) knownUrls.set(it.url, { userAgent: it.userAgent || null, referrer: it.referrer || null, source: it.source });
     for (const a of it.alts || []) {
       if (a?.url && !knownUrls.has(a.url)) knownUrls.set(a.url, { userAgent: a.userAgent || null, referrer: a.referrer || null, source: it.source });
+    }
+    // First listing wins (custom sources are composed first, like knownUrls).
+    if (typeof it.logo === 'string' && /^https?:\/\//i.test(it.logo) && !knownLogos.has(it.logo)) {
+      knownLogos.set(it.logo, { custom: it.source === 'custom' });
     }
     const prev = byId.get(it.id);
     if (!prev) byId.set(it.id, it);
@@ -450,6 +458,16 @@ export function isKnownStreamUrl(url) {
 // -> { userAgent, referrer, source } for any primary or alternate URL, or null (O(1)).
 export function getStreamMeta(url) {
   return (typeof url === 'string' && knownUrls.get(url)) || null;
+}
+
+// Is this a logo URL the catalog vends? The image relay (/api/img) fetches only these,
+// so it can never be turned into an arbitrary-URL fetcher. O(1).
+export function isKnownLogoUrl(url) {
+  return typeof url === 'string' && knownLogos.has(url);
+}
+// -> { custom } for a vended logo URL, or null.
+export function getLogoMeta(url) {
+  return (typeof url === 'string' && knownLogos.get(url)) || null;
 }
 
 async function build(allowStale) {

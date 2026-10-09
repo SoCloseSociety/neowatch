@@ -9,7 +9,7 @@ import { useCatalog } from '@/store/catalogStore';
 import { usePlayer } from '@/store/playerStore';
 import { useUI } from '@/store/uiStore';
 import { useT, fmtTime } from '@/lib/i18n';
-import { EmptyState, Spinner, btnClass } from './ui';
+import { EmptyState, LogoImg, Spinner, btnClass } from './ui';
 import { countryLabel } from './ChannelCard';
 
 interface GP { start: number; stop: number | null; title: string }
@@ -173,7 +173,7 @@ export function ProgrammeTv() {
                     aria-label={ch.name}
                   >
                     <span className="grid h-8 w-10 shrink-0 place-items-center overflow-hidden rounded-field bg-mini" aria-hidden="true">
-                      {ch.logo ? <img src={ch.logo} alt="" loading="lazy" referrerPolicy="no-referrer" className="max-h-[80%] max-w-[85%] object-contain" /> : <Radio size={14} className="text-ink-3" />}
+                      <LogoImg src={ch.logo} width={40} height={32} loading="lazy" fallback={<Radio size={14} className="text-ink-3" />} className="max-h-[80%] max-w-[85%] object-contain" />
                     </span>
                     <span className="truncate text-sous font-semibold text-ink" translate="no">{ch.name}</span>
                   </button>

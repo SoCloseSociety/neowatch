@@ -13,7 +13,7 @@ const FETCH_COUNT = 800;   // top stations by clicks, worldwide
 const PAGE_MAX = 200;
 const RETRY_MS = 10 * 60 * 1000; // after a failed refresh, keep serving the old list this long
 
-let cache = { at: 0, stations: [] };
+let cache = { at: 0, stations: [], icons: new Set() };
 let loading = null;
 
 async function fetchJson(url, timeoutMs = 15000) {
@@ -61,7 +61,9 @@ async function fetchStations() {
         id: s.stationuuid,
         name: String(s.name).trim().slice(0, 80),
         url: streamUrl,
-        favicon: /^https:\/\//i.test(s.favicon || '') ? s.favicon : null,
+        // http:// too: the page shows every favicon through the /api/img relay (our
+        // origin), so a plain-http icon is no longer mixed content.
+        favicon: typeof s.favicon === 'string' && s.favicon.length <= 2048 && /^https?:\/\/[^\s]+$/i.test(s.favicon) ? s.favicon : null,
         country: s.country || null,
         countryCode: s.countrycode || null,
         tags: String(s.tags || '').split(',').map((t) => t.trim()).filter(Boolean).slice(0, 5),
@@ -73,13 +75,19 @@ async function fetchStations() {
     });
   // An empty answer while we hold a list is an upstream hiccup, not "no radios".
   if (!stations.length && cache.stations.length) throw new Error('empty station list');
-  cache = { at: Date.now(), stations };
+  cache = { at: Date.now(), stations, icons: new Set(stations.map((s) => s.favicon).filter(Boolean)) };
   return stations;
 }
 
 // HTTP streams are blocked on our HTTPS page (mixed content) -> the player uses
 // the signed proxy for those; HTTPS plays direct (no VPS load). Signed per
 // response so the link is always fresh (a page is at most PAGE_MAX HMACs).
+// Is this a favicon of a listed station? The image relay (/api/img) fetches only
+// URLs we vend. O(1).
+export function isKnownRadioIcon(url) {
+  return typeof url === 'string' && cache.icons.has(url);
+}
+
 const signStation = ({ _search, ...s }) => ({ ...s, proxyUrl: proxyLink(s.url) });
 
 export const radioRouter = Router();
