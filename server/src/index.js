@@ -242,7 +242,7 @@ const HOME_PROJ_TTL_MS = 90 * 60 * 1000; // re-sign the home payload every 90 mi
 // The health sweep flips verdicts all day: re-rank the rails (online first) when the
 // verdicts moved, at most every 5 min (a sweep batch must not rebuild every request).
 const HOME_RAW_MIN_MS = 5 * 60 * 1000;
-const HOME_RAIL_LEN = 30;
+const HOME_RAIL_LEN = 16; // rows show 8 + See all; the spare covers hidden categories
 const HOME_POOL_LEN = 120; // spotlight candidates per rail (not just the rail's first 30)
 const EMPTY_FILTER = { category: null, country: null, language: null, q: '', foot: false, favoritesOnly: false, onlineOnly: false, hideGeoBlocked: false };
 // UI language -> iptv-org ISO-639 language code used to boost matching channels

@@ -178,7 +178,7 @@ const section = (t) => console.log(`\n=== ${t} ===`);
   section('home rails (Netflix-style)');
   const homeV2 = await req('/api/catalog/home');
   check('home returns rails', (homeV2.data?.rails?.length || 0) >= 10, `rails=${homeV2.data?.rails?.length}`);
-  check('home rail has ~30 channels', (homeV2.data?.rails?.[0]?.channels?.length || 0) >= 20, `len=${homeV2.data?.rails?.[0]?.channels?.length}`);
+  check('home rail has enough channels for a row of 8', (homeV2.data?.rails?.[0]?.channels?.length || 0) >= 8, `len=${homeV2.data?.rails?.[0]?.channels?.length}`);
   check('home rail filter is complete', homeV2.data?.rails?.[0]?.filter && 'onlineOnly' in homeV2.data.rails[0].filter);
   check('home featured present', (homeV2.data?.featured?.length || 0) > 0);
 
