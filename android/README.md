@@ -25,23 +25,20 @@ so the app now hosts the site in its own WebView. Same package, same key, same d
 | Area | Behaviour |
 |---|---|
 | Start URL | `https://neowatch.soclose.co/` |
-| Deep links | `VIEW https://neowatch.soclose.co/*` (`autoVerify`, verified by the existing assetlinks.json) opens that exact URL, e.g. `/chaine/<id>`. `singleTask`: a deep link while running reuses the same WebView. `http://` on our host is upgraded to https. |
+| Deep links | `VIEW https://neowatch.soclose.co/*` (`autoVerify`, verified by the existing assetlinks.json) opens that page, e.g. `/chaine/<id>`. `singleTask`: a deep link while running reuses the same WebView. `http://` on our host is upgraded to https. The check is on the whole raw authority (exactly our host: no user info, no port) and the shell loads a URL rebuilt from the checked parts, never the raw string: an unpatched `android.net.Uri` (API 23 to 26) reads the host of `https://evil.example\@neowatch.soclose.co/` as ours while Chromium loads evil.example (the activity is exported, so any installed app can send that intent). The same check applies to the URL restored after a recreation. |
 | Host allowlist | Only `https://neowatch.soclose.co` loads in the main frame. Any other host / scheme is handed to the system with `ACTION_VIEW` (`intent:` URIs are sanitized: no component, no selector, BROWSABLE). If nothing resolves, a toast and we stay put. Sub-frames (YouTube embeds) are not filtered. |
 | Launcher | `MAIN` + `LAUNCHER` + `LEANBACK_LAUNCHER`; 320x180 banner; leanback + touchscreen `required=false` (still installs on phones). Activity class name kept as `co.soclose.neowatch.twa.LauncherActivity` (same as the TWA) so pinned entries and `am start -n` still resolve. |
 | WebView | JS, DOM storage, database, autoplay (`mediaPlaybackRequiresUserGesture=false`), mixed content NEVER_ALLOW, no file/content access, Safe Browsing on, third-party cookies on (YouTube embeds), text zoom pinned to 100%, hardware accelerated. |
 | User agent | default WebView UA + `" NeoWatchTV/2.0"`: the web app can detect the shell with `/NeoWatchTV\//.test(navigator.userAgent)`. |
 | TV mode | On a TV (`UI_MODE_TYPE_TELEVISION` or the leanback feature), every page of ours gets `localStorage nw.tv = "1"` at page start (2.1.1). That is the web app's TV switch (`web/src/lib/device.ts`): 10-foot layout, focus ring, D-pad autofocus on "Watch now". The TV WebView user agent does not say "TV", so before 2.1.1 the shell ran the site in desktop mode on a TV and the first OK after launch did nothing (no element had focus). Phones never get the flag. |
 | Look | No action bar, fullscreen/immersive, `#05070a` window + WebView background set before the first load (no white flash). |
+| Soft keyboard (phones) | Under a fullscreen window `adjustResize` is ignored (API 23 to 29), so the window never shrank for the keyboard and a field in the lower half (sign-in password, register) stayed under it. The shell pads its root by the part of the screen the keyboard covers (`getWindowVisibleDisplayFrame`, more than 15% of the screen = a keyboard); where the window does resize, that part is 0 and nothing changes. Not on a TV. |
+| Downloads | A file the page makes itself (a `blob:` of our origin, the account's "Download my data") is saved by the shell: the WebView never saves an `a[download]` itself and no other app can open a `blob:`. The page reads the blob (`fetch`, as text, 2 MB max) into `window.__nwSave[<random key>]` and the shell polls it with `evaluateJavascript` (no JavaScript interface, which iframes would see too). API 29+: written to Downloads (no permission). API 23 to 28: a "save as" screen. A toast always says whether the file was saved. Any other download URL goes to the system like a foreign link. |
 | Fullscreen video | `onShowCustomView` / `onHideCustomView`; Back leaves fullscreen first. |
 | Screen | `FLAG_KEEP_SCREEN_ON` only while audio/video is actually playing (polled every 15 s), so an idle home screen still lets the TV screensaver / standby kick in. |
 | Keys | D-pad / Enter go to the page (the web app has its own spatial navigation). **Back** (2.1.1): leave fullscreen, else ask the page through `window.__nwBack()` (the web app's one Back contract, `web/src/lib/spatialNav.ts`): `true` = handled (closed the player / a modal, went back a page, a deep link with no history went Home, or the "Press Back again to exit" toast), `false` = nothing left (second Back within the toast window): `finish()`; no hook (older site, page still loading) = `WebView.goBack()` if possible, else `finish()`. The JS answer has a **300 ms budget**: past it, the shell does the history Back itself and ignores the late answer, so Back never feels dead. **Play/Pause** (remote media key): a Space keydown is dispatched to the page (the player toggles on Space) only when a `<video>` exists. |
 | Offline | A main-frame network error (or 502/503/504 on the page itself) shows a tiny dark page "No connection. Retrying..." with a focused Retry button, in a separate WebView so it never enters the site's back history. Retries 10 s after each failed attempt (immediately on Retry; paused while the app is in the background). |
 | Robustness | Renderer crash (`onRenderProcessGone`, low-RAM TV chips) rebuilds the WebView and reopens the current page instead of killing the app. |
-
-Known limit: closing a modal (Settings, Login, Pricing...) or the multi-screen mosaic is wired to
-**Escape** in the web app, not to history. In the shell the remote's Back key does history-back
-(or leaves the app) and is not delivered to the page as Escape. If that matters, the web app can
-push a history entry when a modal opens (then Back closes it here and in every browser).
 
 Emulator check (08/10/2026, Android TV API 34 emulator, WebView 113, release APK): launches
 from the leanback intent, `pm get-app-links` = `neowatch.soclose.co: verified`, cold and warm
@@ -71,6 +68,14 @@ Back chain, (c) the phone widget tap, (d) Back out of fullscreen video, (e) offl
 focus, the phone emulator, and the final `apksigner` / `check_widgets.py` pass on the shipped APK.
 The fallback and TV-flag checks above used a debug build of the same code (WebView inspection);
 case (a) and the first-OK check used the signed release.
+
+Changes after the 2.1.1 build of 09/10/2026 (review fixes, in the code, NOT in the APK built
+that day; a rebuild is needed, and a `versionCode` bump if that APK was installed anywhere):
+deep links rebuilt from the checked authority, the soft keyboard followed on phones, the page's
+own `blob:` downloads saved, and the widget options screen keeps unsaved picks across a
+rotation. Checked without a device: `javac` against `android-35/android.jar` and
+`python3 -I tools/check_widgets.py` (which now also guards these shell rules); the blob read
+and poll scripts were run as is in desktop Chrome.
 
 ## Home-screen widgets (v2.1.0, phones)
 
@@ -123,12 +128,12 @@ and JobScheduler runs none of its jobs, so every widget opens its options screen
 (that makes the app active and the first read runs); (2) on a 2x2 the state had to go under the
 name (`widget_ligne_s.xml`), and L (8 rows) needs about 360 dp of height.
 
-Server notes seen while testing (not shell issues): the deployed `/api/catalog/home?lang=en`
-returns French rail titles (the widget names the rails itself, by rail key); the deployed
-`/api/catalog/channel/<id>` has no `canonicalId` / `checkedAt` yet and its `?channelId=`
-fallback answers 404 (the widget handles both: it adopts the id the server returns, and a 404
-reads "No longer listed"); `/api/epg/now` sometimes returns `next` equal to `now` (the widget
-then shows no "Next" line).
+Server notes from that run, since fixed on the server (re-checked on prod 09/10/2026):
+`/api/catalog/home?lang=en` rail titles are English, and `/api/catalog/channel/<id>` carries
+`canonicalId` / `checkedAt` with a working `?channelId=` fallback. The widget still names the
+rails itself (by rail key), adopts the id the server returns, and reads a 404 as "No longer
+listed". Seen then and not re-checked: `/api/epg/now` sometimes returned `next` equal to `now`
+(the widget then shows no "Next" line).
 
 ## Build
 
@@ -168,7 +173,7 @@ $BT/apksigner verify --print-certs $APK | grep SHA-256
 $BT/aapt2 dump badging $APK | grep -E "package:|launchable-activity|banner|app-widget|receivers"
 #   provides-component:'app-widget' and other-receivers (the 3 widget providers + WidgetActions)
 python3 -I tools/check_widgets.py     # static check of the widgets, must print OK
-#   package co.soclose.neowatch.twa versionCode 4, launchable-activity AND
+#   package co.soclose.neowatch.twa with the versionCode of app/build.gradle, launchable-activity AND
 #   leanback-launchable-activity = co.soclose.neowatch.twa.LauncherActivity, banner present
 ```
 
@@ -202,6 +207,12 @@ Icons/banner are generated from `web/public/icon-512.png`: `python3 -I android/t
 - [ ] Place **Channel shortcut**: logo + LIVE; a tap opens the channel in NEOWATCH and plays.
 - [ ] Resize (2x2, 4x2, 4x4): S / M / L drawings; long press -> Widget settings: change picks and style.
 - [ ] Airplane mode + refresh: "No connection. This is the last list." and the age keeps counting.
+- [ ] **My channels** options: search, tap 3 channels, rotate the phone before Done: the 3 picks,
+      the style and the logos choice are still there.
+- [ ] In the app (not a widget): Sign in, tap the password field: the keyboard does not cover it
+      and the page scrolls to it (an Android 8 to 10 phone is the case that matters).
+- [ ] Account > Download my data: a toast "File saved: ..." and the JSON is in Downloads (API 29+)
+      or where the "save as" screen put it; cancelling that screen says "File not saved".
 
 ## Test checklist (on a real TV, by the owner)
 
@@ -218,8 +229,9 @@ Icons/banner are generated from `web/public/icon-512.png`: `python3 -I android/t
       Same from Sentinel House (app link launch).
 - [ ] **Autoplay**: the channel starts playing without an extra click (HLS and a YouTube channel).
 - [ ] **Fullscreen**: the player's fullscreen button fills the screen; Back leaves fullscreen.
-- [ ] **Back**: from a channel opened in-app, Back returns to the previous page; from the first
-      page (or a cold deep link), Back leaves the app.
+- [ ] **Back**: from a channel opened in-app, Back returns to the previous page. A cold deep link
+      (`/chaine/<id>`, no history) goes to Home. On Home the first Back shows "Press Back again
+      to exit"; a second Back within 2.6 s leaves the app (later than that, the toast again).
 - [ ] **Play/Pause** media key toggles the HLS player.
 - [ ] **Foreign link** (e.g. a footer link to another site): opens the TV browser or nothing,
       never inside NEOWATCH.

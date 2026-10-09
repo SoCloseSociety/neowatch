@@ -341,6 +341,46 @@ const issued = []; // every token we see -- used at the end to grep the server l
   check('only the winner\'s password logs in', loginWin.status === 200 && loginLose.status === 401, `win=${loginWin.status} lose=${loginLose.status}`);
   if (loginWin.data?.token) issued.push(loginWin.data.token);
 
+  section('a password change racing an admin reset: exactly one wins');
+  // The admin PATCH lands at several offsets into the user's PUT (verify + hash). Whichever
+  // writes second sees the stored hash moved and gets a 409; the winner's password is the
+  // one that logs in. Before the fix the PATCH never checked: both 200, and the user's new
+  // password was silently replaced.
+  for (const delay of [0, 40, 90]) {
+    const rv = await mkUser(`race${delay}`);
+    adminTok = await adminLogin();
+    const userPw = `user-pw-${delay}`, adminPw = `admin-pw-${delay}`;
+    const [put, patch] = await Promise.all([
+      req('/api/auth/password', { method: 'PUT', token: rv.token, body: { currentPassword: 'secret123', newPassword: userPw } }),
+      new Promise((r) => setTimeout(r, delay)).then(() => req(`/api/admin/users/${rv.id}`, { method: 'PATCH', token: adminTok, body: { password: adminPw } })),
+    ]);
+    if (put.data?.token) issued.push(put.data.token);
+    const okCount = [put.status, patch.status].filter((x) => x === 200).length;
+    const conflict = [put.status, patch.status].filter((x) => x === 409).length;
+    const winPw = put.status === 200 ? userPw : adminPw;
+    const losePw = put.status === 200 ? adminPw : userPw;
+    const lw = await req('/api/auth/login', { method: 'POST', body: { email: rv.email, password: winPw } });
+    const ll = await req('/api/auth/login', { method: 'POST', body: { email: rv.email, password: losePw } });
+    if (lw.data?.token) issued.push(lw.data.token);
+    check(`admin reset ${delay} ms into the user's change: one 200 + one 409, only the winner's password logs in`,
+      okCount === 1 && conflict === 1 && lw.status === 200 && ll.status === 401,
+      `put=${put.status} patch=${patch.status} login winner=${lw.status} loser=${ll.status}`);
+  }
+
+  section('TV pairing token is one-time, whatever the deviceCode shape');
+  const one = await mkUser('onetime');
+  const ps = await req('/api/auth/device/start', { method: 'POST', body: {} });
+  await req('/api/auth/device/approve', { method: 'POST', token: one.token, body: { code: ps.data?.userCode } });
+  const pArr = await req('/api/auth/device/poll', { method: 'POST', body: { deviceCode: [ps.data?.deviceCode] } });
+  check('poll with deviceCode as an array -> no token', !pArr.data?.token, `status=${pArr.data?.status}`);
+  const pOk = await req('/api/auth/device/poll', { method: 'POST', body: { deviceCode: ps.data?.deviceCode } });
+  if (pOk.data?.token) issued.push(pOk.data.token);
+  const pAgain = await req('/api/auth/device/poll', { method: 'POST', body: { deviceCode: ps.data?.deviceCode } });
+  const pAgainArr = await req('/api/auth/device/poll', { method: 'POST', body: { deviceCode: [ps.data?.deviceCode] } });
+  check('the string poll gets the token once; every later poll (string or array) -> expired, no token',
+    pOk.data?.status === 'approved' && !!pOk.data?.token && pAgain.data?.status === 'expired' && !pAgain.data?.token && !pAgainArr.data?.token,
+    `first=${pOk.data?.status} again=${pAgain.data?.status} again(array)=${pAgainArr.data?.status}`);
+
   section('user-specific responses are Cache-Control: private, no-store');
   const pv = await mkUser('priv');
   const cc = (r) => (r.cacheControl || '').toLowerCase();

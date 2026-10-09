@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { config } from './config.js';
 import { rateLimit } from './ratelimit.js';
+import { readJsonArray } from './util.js';
 
 // A valid bcrypt hash compared against when an email is unknown, so login timing
 // does not reveal whether an account exists (constant-time-ish enumeration guard).
@@ -54,12 +55,13 @@ const USERS_FILE = join(config.dataDir, 'users.json');
 let users = [];
 let loaded = false;
 
+// Only a MISSING file is an empty store. A corrupt or unreadable users.json used to load as
+// [] and initAuth() then saved a lone admin over it: every account (and paying customer)
+// silently gone. Now boot stops (index.js exits 1) and the file is left untouched (+ .bak).
 async function load() {
-  try {
-    users = JSON.parse(await readFile(USERS_FILE, 'utf8'));
-  } catch {
-    users = [];
-  }
+  const { data } = await readJsonArray(USERS_FILE, 'auth');
+  if (!data) throw Object.assign(new Error(`${USERS_FILE} is unreadable or corrupt`), { code: 'USERS_STORE' });
+  users = data;
   loaded = true;
 }
 
@@ -510,16 +512,19 @@ authRouter.post('/device/start', deviceStartLimit, (req, res) => {
 
 // TV: poll until the phone approves, then receive a token (one-time).
 authRouter.post('/device/poll', devicePollLimit, (req, res) => {
-  const rec = pairings.get(String(req.body?.deviceCode || ''));
+  // One normalized key for the lookup AND the deletes: ["<code>"] used to match the lookup
+  // (String(array)) but delete nothing, so the pairing handed out a token on every poll.
+  const dc = typeof req.body?.deviceCode === 'string' ? req.body.deviceCode : '';
+  const rec = pairings.get(dc);
   if (!rec || rec.expiresAt < Date.now()) {
-    if (rec) { pairings.delete(req.body.deviceCode); pairingByUserCode.delete(rec.userCode); }
+    if (rec) { pairings.delete(dc); pairingByUserCode.delete(rec.userCode); }
     return res.json({ status: 'expired' });
   }
   if (rec.status !== 'approved') return res.json({ status: 'pending' });
   // Approved: consume the pairing and hand the TV a fresh token -- unless the approver's
   // session was revoked since (tokenVersion moved): the approval was made with a token
   // that is dead now, so it must not be convertible into a live one.
-  pairings.delete(req.body.deviceCode);
+  pairings.delete(dc);
   pairingByUserCode.delete(rec.userCode);
   const user = users.find((u) => u.id === rec.userId);
   if (!user || user.status !== 'active' || (user.tokenVersion || 0) !== rec.tv) return res.json({ status: 'expired' });
@@ -686,6 +691,9 @@ adminRouter.post('/users', wrap(async (req, res) => {
     createdAt: new Date().toISOString(),
     favorites: [],
   };
+  // Re-check after the async hash (a double click sent two creates: both passed the first
+  // check and left two accounts with one email, the second one unusable).
+  if (users.some((u) => u.email === norm)) return res.status(409).json({ error: 'email already exists' });
   users.push(user);
   await save();
   res.json({ user: sanitize(user) });
@@ -700,6 +708,16 @@ adminRouter.patch('/users/:id', wrap(async (req, res) => {
   if (password !== null && !validPassword(password)) return res.status(400).json({ error: PW_ERROR });
   if (name !== undefined && name !== null && typeof name !== 'string') return res.status(400).json({ error: 'name must be text' });
 
+  // Hash first, before anything is changed: if the stored hash moved while we hashed (the
+  // user's own PUT /auth/password landed), this reset loses with a 409 and changes nothing.
+  // Exactly one of the two wins (the user's change no longer gets a 200 and is then lost).
+  let newHash = null;
+  if (password) {
+    const before = user.passwordHash;
+    newHash = await bcrypt.hash(password, 10);
+    if (user.passwordHash !== before) return res.status(409).json({ error: 'password changed concurrently, try again' });
+  }
+
   // Never let the last active admin be demoted or disabled (lock-out guard).
   const activeAdmins = users.filter((u) => u.role === 'admin' && u.status === 'active');
   const wouldDropAdmin =
@@ -711,7 +729,7 @@ adminRouter.patch('/users/:id', wrap(async (req, res) => {
   if (role && ['user', 'admin'].includes(role)) user.role = role;
   if (status && ['active', 'disabled'].includes(status)) user.status = status;
   if (name && name.trim()) user.name = name.trim().slice(0, NAME_MAX);
-  if (password) user.passwordHash = await bcrypt.hash(password, 10);
+  if (newHash) user.passwordHash = newHash;
   // Disabling or resetting the password also kills the sessions already issued
   // (re-enabling later requires a fresh login).
   if (status === 'disabled' || password) {

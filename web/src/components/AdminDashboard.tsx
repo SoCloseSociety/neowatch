@@ -586,7 +586,7 @@ function EpgManager() {
               {s.lastError ? (
                 <Pill tone="alert" data className="max-w-[40%] truncate">{s.lastError}</Pill>
               ) : (
-                <span className="meta shrink-0">{t('pages.admin.programmes', { n: s.count })}</span>
+                <span className="meta shrink-0">{t.n('pages.admin.programmes', s.count)}</span>
               )}
               <Button variant="quiet" iconOnly onClick={() => remove(s.id)} aria-label={t('pages.admin.delete')} title={t('pages.admin.delete')} icon={<Trash2 size={16} aria-hidden="true" />} />
             </li>

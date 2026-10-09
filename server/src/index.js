@@ -201,11 +201,15 @@ const intParam = (v, def, min, max) => {
   return Number.isFinite(n) && n !== 0 ? Math.min(max, Math.max(min, n)) : def;
 };
 
+const Q_MAX = 100; // same cap as /api/epg/search
+
 app.get('/api/catalog/channels', gateContent, async (req, res) => {
   try {
     await ensureCatalog();
     const category = qstr(req.query.category), country = qstr(req.query.country);
-    const language = qstr(req.query.language), q = qstr(req.query.q);
+    // q is capped (a long multi-token query was matched against every channel, twice:
+    // ~0.4 s of blocked event loop per 8 KB URL). Token count is capped in selectChannels.
+    const language = qstr(req.query.language), q = qstr(req.query.q)?.slice(0, Q_MAX);
     const foot = req.query.foot === '1' || req.query.foot === 'true';
     const hideOffline = req.query.hideOffline === '1' || req.query.hideOffline === 'true';
     const sort = ['name', 'latency'].includes(req.query.sort) ? req.query.sort : 'smart';
@@ -445,7 +449,8 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 if (existsSync(config.webDist)) {
   // A missing hashed chunk (an old tab after a deploy) must be a real 404: answered
   // with index.html it fails as a module AND gets cached as JS by the service worker.
-  app.use('/assets', express.static(join(config.webDist, 'assets'), { fallthrough: false, index: false }));
+  // Hashed file names: cacheable forever (the Docker/self-host path has no nginx to add it).
+  app.use('/assets', express.static(join(config.webDist, 'assets'), { fallthrough: false, index: false, immutable: true, maxAge: '1y' }));
   app.use(express.static(config.webDist));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/')) return next();
@@ -474,7 +479,13 @@ async function start() {
   const warnings = validateConfig();
   for (const w of warnings) console.log(`[config:${w.level}] ${w.key}: ${w.msg}`);
 
-  await initAuth();
+  try {
+    await initAuth();
+  } catch (e) {
+    // A corrupt/unreadable users.json: never boot on an empty store (it would be saved over).
+    console.error(`\n  FATAL: ${e.message}. Accounts were NOT touched. Repair the file (a .bak copy is kept next to it) and restart.\n`);
+    process.exit(1);
+  }
   await loadBlocklist(); // before the first catalog build so takedowns apply immediately
   await loadIdAliases();
   // Custom M3U sources + EPG do not need the iptv-org base (setCustomItems composes

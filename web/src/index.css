@@ -44,6 +44,12 @@
   --encre-image: #f2f6f8;
   /* Behind art that has no picture (a channel page without ambiance): dark in both styles. */
   --fond-image: #0a0d10;
+  /* Logo plates (cards, guide, radios, channel page). Channel logos are drawn for
+     dark screens (many are white on transparent): the plate stays dark in Doux too. */
+  --plaque: var(--bg-3);
+  --plaque-mini: var(--surface-mini);
+  --plaque-encre: rgb(var(--ink-2));
+  --plaque-encre-3: rgb(var(--ink-3));
   --voile-image: linear-gradient(180deg, rgba(5,7,10,0) 30%, rgba(5,7,10,.86) 100%);
   --voile-hero: linear-gradient(90deg, rgba(5,7,10,.9) 0, rgba(5,7,10,.55) 38%, rgba(5,7,10,.08) 70%),
                 linear-gradient(180deg, rgba(5,7,10,0) 0, rgba(5,7,10,0) 30%, rgba(5,7,10,.92) 62%, rgba(5,7,10,1) 80%);
@@ -171,6 +177,10 @@
   --ok: 11 117 86;
   --line-rgb: 90 70 50;
   /* --encre-image and --voile-image stay dark in Doux: text on a thumbnail stays light on a dark scrim */
+  --plaque: #2a2520;
+  --plaque-mini: #2a2520;
+  --plaque-encre: #d8cfc2;
+  --plaque-encre-3: #bbb1a4;
 }
 /* The phone: the same scale, at arm's length (charte.css section 3). */
 @media (max-width: 760px) {

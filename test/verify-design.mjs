@@ -341,6 +341,7 @@ function measurePage({ lang }) {
     for (let x = el; x; x = x.parentElement) {
       const s = getComputedStyle(x);
       if (s.backgroundImage && s.backgroundImage !== 'none') return null; // image or gradient: pixel method
+      if (x.hasAttribute('data-hero')) return null; // hero art is an <img> under a scrim: pixel method
       const c = parse(s.backgroundColor);
       if (c && c[3] > 0) {
         layers.push(c);
@@ -516,8 +517,10 @@ async function heroMatch(page) {
       featured = (d.featured || [])[0] || null;
     } catch { /* no home payload */ }
     const imgs = [...document.querySelectorAll('*')].map((x) => getComputedStyle(x).backgroundImage).filter((b) => /url\(/.test(b) && /(ambiance|hero\.webp)/.test(b));
-    const shown = imgs[0] || '';
-    const file = (/url\("?([^")]+)"?\)/.exec(shown) || [])[1] || '';
+    // The art is an <img srcset> (PERF-4): a 960 px copy counts as its 1920 px file.
+    const art = document.querySelector('[data-hero] img[src*="/ambiance/"]');
+    const shown = imgs[0] || (art ? `url("${new URL(art.currentSrc || art.src, location.href).pathname}")` : '');
+    const file = ((/url\("?([^")]+)"?\)/.exec(shown) || [])[1] || '').replace(/-960\.webp$/, '.webp');
     const cat = featured?.categories?.[0] || null;
     const want = cat && AMB[cat] ? `/ambiance/${AMB[cat]}.webp` : 'logo window';
     const faults = [];

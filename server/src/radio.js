@@ -96,7 +96,7 @@ export const radioRouter = Router();
 radioRouter.get('/radios', async (req, res) => {
   try {
     let list = await loadStations();
-    const q = norm(req.query.q).trim();
+    const q = norm(typeof req.query.q === 'string' ? req.query.q.slice(0, 100) : '').trim();
     const country = String(req.query.country || '').toUpperCase();
     const tag = norm(req.query.tag).trim();
     if (country) list = list.filter((s) => s.countryCode === country);

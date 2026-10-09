@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import QRCode from 'qrcode';
+import { qrDataUrl } from '@/lib/qr';
 import { X, Smartphone, Tv, Monitor, Copy } from 'lucide-react';
 import { useUI, toast } from '@/store/uiStore';
 import { useAuth } from '@/store/authStore';
@@ -91,7 +91,7 @@ export function Install() {
 
   useEffect(() => {
     if (!open || shell) return;
-    QRCode.toDataURL(url, { width: 320, margin: 1, color: { dark: '#05070a', light: '#ffffff' } })
+    qrDataUrl(url)
       .then(setQr)
       .catch(() => setQr(''));
   }, [open, url, shell]);

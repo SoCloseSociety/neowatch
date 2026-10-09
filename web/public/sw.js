@@ -9,12 +9,16 @@
 //     the cached shell offline; only a 2xx text/html answer refreshes the shell;
 //   - everything else (/api, the stream proxy, non-GET, cross-origin media, tv.html,
 //     app.apk, robots.txt...) is never touched.
+// The build's JS/CSS chunks (lazy pages included) are precached at install, so a deep
+// link opened offline (/radios, /chaine/<id>) has its page, not the crash screen
+// (WEB-12). The list is written at build (vite.config.ts), empty in dev.
 // CACHE is build-stamped (__SW_VERSION__ replaced at build) so every deploy gets a new
 // cache and `activate` purges the previous generation. The "v2" bump drops every
 // cache written by the previous worker (it could hold HTML stored as a chunk).
 
 const CACHE = 'neowatch-shell-v2-__SW_VERSION__';
 const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
+const ASSETS = /*__SW_ASSETS__*/[];
 const STATIC_RE = /\.(js|css|svg|png|webp|jpe?g|ico|webmanifest|woff2?)$/i;
 
 self.addEventListener('install', (event) => {
@@ -22,7 +26,17 @@ self.addEventListener('install', (event) => {
     caches
       .open(CACHE)
       // One missing optional file must not abort the whole install.
-      .then((c) => Promise.all(SHELL.map((u) => c.add(u).catch(() => {}))))
+      .then((c) =>
+        Promise.all([
+          ...SHELL.map((u) => c.add(u).catch(() => {})),
+          // Chunks: only a real asset is kept (never the SPA's index.html fallback).
+          ...ASSETS.map((u) =>
+            fetch(u)
+              .then((res) => (cacheable(res) && !isHtml(res) ? c.put(u, res) : undefined))
+              .catch(() => {})
+          ),
+        ])
+      )
       .then(() => self.skipWaiting())
   );
 });

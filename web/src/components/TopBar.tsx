@@ -110,7 +110,16 @@ export function TopBar() {
   const narrow = useNarrow();
 
   const [local, setLocal] = useState(filterQ);
-  const debounced = useRef(debounce((q: string) => setFilters({ q }), 350)).current;
+  // Typing on another page goes to the results (the grid lives on '/'): a search
+  // must never run unseen in the background (WEB-16).
+  const where = useRef({ pathname, navigate });
+  where.current = { pathname, navigate };
+  const debounced = useRef(
+    debounce((q: string) => {
+      setFilters({ q });
+      if (q.trim() && where.current.pathname !== '/') where.current.navigate('/');
+    }, 350)
+  ).current;
   // Search history (suggestions): a settled query is remembered after typing stops.
   const searchHistory = useCatalog((s) => s.searchHistory);
   const addSearchTerm = useCatalog((s) => s.addSearchTerm);
@@ -185,7 +194,7 @@ export function TopBar() {
     <header className="sticky top-0 z-30 border-b border-line bg-surface/90 backdrop-blur-xl">
       <div className="mx-auto flex h-[var(--entete-h)] w-full max-w-[1760px] items-center gap-3 px-[var(--gouttiere)]">
         {/* Brand + status point */}
-        <button type="button" onClick={goHome} className="flex shrink-0 items-center gap-2 rounded-field py-1" aria-label={t('shell.home')} title={t('shell.home')}>
+        <button type="button" onClick={goHome} className="flex shrink-0 items-center gap-2 rounded-field py-1" title={t('shell.home')}>
           <span translate="no" className="brand text-libelle text-ink">
             NEOWATCH
           </span>

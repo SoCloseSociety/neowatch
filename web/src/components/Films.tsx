@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Film as FilmIcon, Search, Play } from 'lucide-react';
 import { api } from '@/lib/api';
-import type { Channel } from '@/types';
+import { filmChannel, type Film } from '@/lib/films';
 import { usePlayer } from '@/store/playerStore';
 import { useCatalog } from '@/store/catalogStore';
 import { toast } from '@/store/uiStore';
 import { useT } from '@/lib/i18n';
 import { AdBanner } from './AdBanner';
 import { EmptyState, Spinner } from './ui';
-
-interface Film { id: string; title: string; year: number | null; description: string; genres: string[]; poster: string }
 
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 
@@ -46,16 +44,10 @@ export function Films() {
     setBusyId(f.id);
     try {
       const r = await api.get<{ url: string }>(`/films/${encodeURIComponent(f.id)}/play`);
-      const ch: Channel = {
-        id: `film:${f.id}`, channelId: null, name: f.title, url: r.url, kind: 'other',
-        quality: null, label: null, userAgent: null, referrer: null, logo: f.poster,
-        categories: ['movies'], categoryNames: [t('cat.movies')], country: null,
-        countryName: f.year ? String(f.year) : null, flag: null, languages: [], languageNames: [],
-        website: null, nsfw: false, tier: 'free', locked: false, source: 'custom',
-        proxyUrl: null, alternates: [], online: true, latency: null,
-      };
+      const ch = filmChannel(f, r.url);
       addRecent(ch);
-      play(ch);
+      // A film is not a channel list: no zapping from it (Previous / Next stay hidden).
+      play(ch, { queue: [ch] });
     } catch {
       toast(t('pages.films.playFailed'));
     } finally {

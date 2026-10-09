@@ -39,7 +39,7 @@ jobs:
         # --tokens compares with Sentinel House charte.css, which is not in this repo: local only.
         run: node test/verify-design.mjs --keys
 
-      - name: Server suites (contract, integration, proxy, account, catalog, session)
+      - name: Server suites (contract, integration, proxy, img, account, catalog, hardening, session)
         run: npm test
 
       - name: Dependency audit (production deps, high and critical)

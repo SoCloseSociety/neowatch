@@ -13,18 +13,21 @@ import { countryLabel } from './ChannelCard';
 import { categoryLabel } from '@/lib/format';
 import { fetchNowNext, type NowNext } from '@/lib/epg';
 import { useCatalog } from '@/store/catalogStore';
-import { usePlayer, MAX_TILES } from '@/store/playerStore';
+import { usePlayer, MAX_TILES, isStub } from '@/store/playerStore';
 import { useSettings } from '@/store/settingsStore';
 import { toast } from '@/store/uiStore';
 import { useT, fmtTime } from '@/lib/i18n';
 import { isTV } from '@/lib/device';
-import { navigateFromLayers } from '@/lib/spatialNav';
+import { navigateFromLayers, pushBackHandler } from '@/lib/spatialNav';
+import { isFilm } from '@/lib/films';
 
 // The player (spec 2.5): a layer over everything (spatialNav pushes a history
 // entry, takes focus, restores it to the launching card on Back). Top: close,
 // LIVE · category · country, the channel name, now / next. Bottom: one row of
 // controls. Zapping: Previous / Next channel in the list it was opened from
-// (buttons, PageUp / PageDown, ChannelUp / ChannelDown).
+// (buttons, PageUp / PageDown, ChannelUp / ChannelDown). The player stays
+// mounted while zapping (only the video is replaced): the sound choice and the
+// focused control carry over to the next channel.
 
 interface Track { name: string; lang?: string }
 
@@ -56,6 +59,8 @@ export function Player({ channel }: { channel: Channel }) {
   const [status, setStatus] = useState<PlaybackStatus>('loading');
   const [levels, setLevels] = useState<{ height: number; bitrate: number }[]>([]);
   const [currentLevel, setCurrentLevel] = useState(-1);
+  /** The viewer's quality choice: -1 = Automatic (ABR), else a forced level. */
+  const [manualLevel, setManualLevel] = useState(-1);
   const [menu, setMenu] = useState<'quality' | 'tracks' | null>(null);
   const startMuted = usePlayer((s) => s.startMuted);
   const [muted, setMuted] = useState(defaultMuted || startMuted);
@@ -67,7 +72,28 @@ export function Player({ channel }: { channel: Channel }) {
   const [subTracks, setSubTracks] = useState<Track[]>([]);
   const [subTrack, setSubTrack] = useState(-1);
   const isYouTube = channel.kind === 'youtube';
+  const film = isFilm(channel);
   const tv = isTV();
+
+  // Zapping: the new channel starts clean (menus closed, not paused). When the
+  // control that zapped is gone (the error overlay's Next), the remote keeps a
+  // target: Next channel, else the main action.
+  const firstUrl = useRef(channel.url);
+  useEffect(() => {
+    if (firstUrl.current === channel.url) return;
+    firstUrl.current = channel.url;
+    setMenu(null);
+    setPaused(false);
+    setStatus('loading');
+    const raf = requestAnimationFrame(() => {
+      const root = rootRef.current;
+      const a = document.activeElement;
+      if (!root || (a && a !== document.body && root.contains(a))) return;
+      root.querySelector<HTMLElement>('[data-zap="next"]')?.focus({ preventScroll: true }) ||
+        root.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [channel.url]);
 
   // Now / next for this channel, when the guide has it.
   useEffect(() => {
@@ -98,7 +124,7 @@ export function Player({ channel }: { channel: Channel }) {
       v.removeEventListener('play', onPlay);
       v.removeEventListener('pause', onPause);
     };
-  }, [volume, muted, status]);
+  }, [volume, muted, status, channel.url, ready]);
 
   const togglePlay = () => {
     const v = getVideo();
@@ -178,7 +204,7 @@ export function Player({ channel }: { channel: Channel }) {
   const onHls = (hls: Hls | null) => {
     hlsRef.current = hls;
     // Reset stale level / track state whenever the instance is torn down or replaced.
-    setLevels([]); setCurrentLevel(-1);
+    setLevels([]); setCurrentLevel(-1); setManualLevel(-1);
     setAudioTracks([]); setAudioTrack(-1); setSubTracks([]); setSubTrack(-1);
     if (!hls) return;
     const syncTracks = () => {
@@ -202,7 +228,7 @@ export function Player({ channel }: { channel: Channel }) {
 
   const pickAudio = (id: number) => { if (hlsRef.current) hlsRef.current.audioTrack = id; setAudioTrack(id); setMenu(null); };
   const pickSub = (id: number) => { if (hlsRef.current) hlsRef.current.subtitleTrack = id; setSubTrack(id); setMenu(null); };
-  const pickLevel = (idx: number) => { if (hlsRef.current) hlsRef.current.currentLevel = idx; setCurrentLevel(idx); setMenu(null); };
+  const pickLevel = (idx: number) => { if (hlsRef.current) hlsRef.current.currentLevel = idx; setManualLevel(idx); setMenu(null); };
   const hasTracks = audioTracks.length > 1 || subTracks.length > 0;
 
   const enterPip = async () => {
@@ -213,11 +239,13 @@ export function Player({ channel }: { channel: Channel }) {
   };
 
   const onFavorite = () => {
+    if (isStub(channel)) return; // a guide row still resolving: no stream to keep yet
     const was = isFavorite;
     toggleFavorite(channel);
     toast(t(was ? 'toast.removedList' : 'toast.addedList'), { ok: !was, undo: () => toggleFavorite(channel) });
   };
   const onMulti = () => {
+    if (isStub(channel)) return;
     const n = usePlayer.getState().multi.length + (inMulti ? 0 : 1);
     addToMulti(channel);
     if (!inMulti) toast(t('toast.addedMulti', { n: Math.min(n, MAX_TILES), max: MAX_TILES }), { ok: true });
@@ -245,7 +273,8 @@ export function Player({ channel }: { channel: Channel }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             {/* What the screen shows, not the last check: no LIVE over the error overlay. */}
-            {status === 'playing' ? <LivePill /> : status === 'error' ? <Pill tone="alert">{t('pill.unavailable')}</Pill> : <HealthPill status={health} />}
+            {/* A film is not live: its own pill, never LIVE. */}
+            {status === 'error' ? <Pill tone="alert">{t('pill.unavailable')}</Pill> : film ? <Pill>{t('pill.film')}</Pill> : status === 'playing' ? <LivePill /> : <HealthPill status={health} />}
             {(category || country) && (
               <p className="overline truncate">
                 {category}
@@ -269,7 +298,7 @@ export function Player({ channel }: { channel: Channel }) {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {channel.id && (
+          {channel.id && !film && (
             <button type="button" onClick={openChannelPage} className="btn btn-secondary hidden sm:inline-flex">
               {t('player.channelPage')}
             </button>
@@ -284,6 +313,7 @@ export function Player({ channel }: { channel: Channel }) {
       <div ref={containerRef} tabIndex={-1} className="relative min-h-0 flex-1 bg-black outline-none">
         {ready ? (
           <HlsVideo
+            key={channel.url}
             channel={channel}
             muted={muted}
             // Native controls once the picture runs: while loading, the browser's own
@@ -316,7 +346,7 @@ export function Player({ channel }: { channel: Channel }) {
           </Ctrl>
         )}
         {canZap && (
-          <Ctrl onClick={next} label={t('player.nextChannel')}>
+          <Ctrl onClick={next} label={t('player.nextChannel')} zap="next">
             <SkipForward size={18} />
           </Ctrl>
         )}
@@ -363,12 +393,14 @@ export function Player({ channel }: { channel: Channel }) {
                 <Gauge size={18} />
               </Ctrl>
               {menu === 'quality' && (
-                <Menu label={t('player.quality')}>
-                  <MenuItem checked={currentLevel === -1} onSelect={() => pickLevel(-1)} autoFocus>
+                <Menu label={t('player.quality')} onClose={() => setMenu(null)}>
+                  <MenuItem checked={manualLevel === -1} onSelect={() => pickLevel(-1)} autoFocus>
                     {t('shell.qualityAuto')}
+                    {/* What Automatic plays right now. */}
+                    {manualLevel === -1 && levels[currentLevel]?.height ? <span translate="no" className="text-ink-3">{` · ${levels[currentLevel].height}p`}</span> : null}
                   </MenuItem>
                   {levels.map((l, i) => (
-                    <MenuItem key={i} checked={currentLevel === i} onSelect={() => pickLevel(i)}>
+                    <MenuItem key={i} checked={manualLevel === i} onSelect={() => pickLevel(i)}>
                       {l.height ? <span translate="no">{`${l.height}p`}</span> : t('shell.qualityLevel', { n: i + 1 })}
                     </MenuItem>
                   ))}
@@ -382,7 +414,7 @@ export function Player({ channel }: { channel: Channel }) {
                 <Subtitles size={18} />
               </Ctrl>
               {menu === 'tracks' && (
-                <Menu label={t('shell.audioSubs')}>
+                <Menu label={t('shell.audioSubs')} onClose={() => setMenu(null)}>
                   {audioTracks.length > 1 && (
                     <>
                       <p className="overline px-3 pb-1 pt-2">{t('player.audioTrack')}</p>
@@ -427,13 +459,14 @@ function trackName(tr: Track, fallback: string) {
   return tr.name || tr.lang || fallback;
 }
 
-function Ctrl({ children, onClick, label, pressed, autoFocus, hasMenu }: {
+function Ctrl({ children, onClick, label, pressed, autoFocus, hasMenu, zap }: {
   children: ReactNode;
   onClick: () => void;
   label: string;
   pressed?: boolean;
   autoFocus?: boolean;
   hasMenu?: boolean;
+  zap?: 'next';
 }) {
   return (
     <button
@@ -445,6 +478,7 @@ function Ctrl({ children, onClick, label, pressed, autoFocus, hasMenu }: {
       aria-haspopup={hasMenu ? 'menu' : undefined}
       aria-expanded={hasMenu ? !!pressed : undefined}
       data-autofocus={autoFocus ? '' : undefined}
+      data-zap={zap}
       className={clsx('btn btn-icon', pressed ? 'btn-secondary border-[var(--t2)] text-ink' : 'btn-secondary text-ink-2 hover:text-ink')}
     >
       <span aria-hidden="true" className="contents">
@@ -454,12 +488,28 @@ function Ctrl({ children, onClick, label, pressed, autoFocus, hasMenu }: {
   );
 }
 
-function Menu({ label, children }: { label: string; children: ReactNode }) {
+function Menu({ label, children, onClose }: { label: string; children: ReactNode; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   // Focus the checked (or first) item when the menu opens: the D-pad starts inside it.
+  // Every Back (TV keys, Escape on a TV, the Android shell's __nwBack) closes the
+  // menu first and the player on the next one; the focus goes back to the button
+  // that opened the menu.
   useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
     const el = ref.current?.querySelector<HTMLElement>('[aria-checked="true"]') || ref.current?.querySelector<HTMLElement>('[role="menuitemradio"]');
     el?.focus({ preventScroll: true });
+    const release = pushBackHandler(() => {
+      closeRef.current();
+      return true;
+    });
+    return () => {
+      release();
+      const a = document.activeElement;
+      const lost = !a || a === document.body || !a.isConnected;
+      if (lost && opener && opener !== document.body && opener.isConnected) opener.focus({ preventScroll: true });
+    };
   }, []);
   return (
     <div

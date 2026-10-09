@@ -35,6 +35,7 @@ const SUITES = {
   img: { file: 'img-test.mjs', upstream: 'UPSTREAM_PORT' },
   account: { file: 'account-test.mjs', env: { S3_MODE: 'dev' }, ports: ['FEED_PORT', 'STRIPE_PORT'], dataDir: true },
   catalog: { file: 'catalog-test.mjs', env: { MODE: 'live' }, dataDir: true },
+  hardening: { file: 'hardening-test.mjs', upstream: 'UPSTREAM_PORT' },
   session: {
     file: 'session-test.mjs', upstream: 'UPSTREAM_PORT',
     env: { TTL_S: '8', RENEW_S: '3' },

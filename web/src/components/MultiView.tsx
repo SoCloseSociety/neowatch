@@ -32,6 +32,8 @@ export function MultiView() {
   const [width, setWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280));
   const t = useT();
   const tv = isTV();
+  /** Url of the sound tile the browser keeps muted (autoplay with sound refused). */
+  const [blocked, setBlocked] = useState<string | null>(null);
 
   // Re-pick the layout on resize / rotate (tablet portrait <-> landscape).
   useEffect(() => {
@@ -59,6 +61,22 @@ export function MultiView() {
     toast(t('shell.tileRemoved', { name }), { undo: () => restoreMulti(before, audio) });
   };
 
+  // Pick the tile to hear. Already the sound tile but kept muted by the browser:
+  // unmute it right here, inside the tap (the only moment Safari / iOS allow it).
+  const select = (url: string, tile: Element | null) => {
+    if (activeAudio === url && blocked === url) {
+      const v = tile?.querySelector('video');
+      if (v) {
+        v.muted = false;
+        v.play().catch(() => { /* still refused: the pill keeps saying so */ });
+        if (!v.muted) setBlocked(null);
+      }
+      return;
+    }
+    setBlocked(null);
+    setActiveAudio(url);
+  };
+
   // Focus layout: the tile with sound (or the first) spans 2x2.
   const focusUrl = activeAudio && multi.some((c) => c.url === activeAudio) ? activeAudio : multi[0]?.url;
   const canFocus = multi.length >= 3;
@@ -74,7 +92,7 @@ export function MultiView() {
           </h2>
           {multi.length > 0 && (
             <p className="meta">
-              {t('shell.tilesOf', { n: fmtNum(multi.length), max: fmtNum(MAX_TILES) })}
+              {t.n('shell.tilesOf', multi.length, { max: fmtNum(MAX_TILES) })}
               <span className="hidden md:inline"> · {t('shell.multiHint')}</span>
             </p>
           )}
@@ -115,68 +133,75 @@ export function MultiView() {
           {multi.map((ch, idx) => {
             const isAudio = activeAudio === ch.url;
             const isFocus = focusLayout && ch.url === focusUrl;
+            const silenced = isAudio && blocked === ch.url;
             return (
+              // A plain group (WEB-14): ONE button selects the sound (it covers the
+              // tile for the D-pad and screen readers), Remove is its sibling. The
+              // pointer goes through it, so the video's own Retry stays clickable.
               <div
                 key={ch.url}
                 data-key={ch.url}
-                tabIndex={0}
-                role="button"
-                aria-pressed={isAudio}
-                aria-label={t('shell.tileLabel', { name: ch.name })}
-                data-autofocus={(activeAudio ? isAudio : idx === 0) ? '' : undefined}
-                onClick={() => setActiveAudio(ch.url)}
-                onKeyDown={(e) => {
-                  if (e.target !== e.currentTarget) return;
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setActiveAudio(ch.url);
-                  } else if (e.key === 'Delete') {
-                    e.preventDefault();
-                    remove(ch.url, ch.name);
-                  }
-                }}
+                role="group"
+                aria-label={ch.name}
+                onClick={(e) => select(ch.url, e.currentTarget)}
                 className={clsx(
-                  'group relative min-h-0 cursor-pointer overflow-hidden rounded-card bg-black',
+                  'group relative min-h-0 cursor-pointer rounded-card bg-black',
                   isFocus && 'col-span-2 row-span-2',
                   isAudio ? 'shadow-[inset_0_0_0_2px_var(--t1)]' : 'shadow-[inset_0_0_0_1px_var(--line)]'
                 )}
               >
-                <HlsVideo channel={ch} muted={!isAudio} controls={false} lowRes startDelayMs={idx * 300} />
+                {/* Clips the picture to the tile; the select button stays outside it so its focus ring is not cut. */}
+                <div className="absolute inset-0 overflow-hidden rounded-card">
+                <HlsVideo
+                  channel={ch}
+                  muted={!isAudio}
+                  controls={false}
+                  lowRes
+                  startDelayMs={idx * 300}
+                  // The browser refused sound outside a tap (Safari / iOS): the tile
+                  // says so, and the next tap on it turns the sound on (WEB-13).
+                  onMutedChange={(m) => setBlocked((b) => (m ? ch.url : b === ch.url ? null : b))}
+                />
+                </div>
+
+                <button
+                  type="button"
+                  aria-pressed={isAudio}
+                  aria-label={t('shell.tileLabel', { name: ch.name })}
+                  data-autofocus={(activeAudio ? isAudio : idx === 0) ? '' : undefined}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    select(ch.url, e.currentTarget.parentElement);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Delete') {
+                      e.preventDefault();
+                      remove(ch.url, ch.name);
+                    }
+                  }}
+                  className="pointer-events-none absolute inset-0 rounded-card"
+                />
 
                 {/* Name + sound state: always readable, never over the middle of the picture. */}
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 bg-[linear-gradient(180deg,rgba(5,7,10,0),rgba(5,7,10,.86))] px-3 pb-2 pt-6">
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 rounded-b-card bg-[linear-gradient(180deg,rgba(5,7,10,0),rgba(5,7,10,.86))] px-3 pb-2 pt-6">
                   <span translate="no" className="text-on-image min-w-0 truncate text-sous font-semibold">
                     {ch.name}
                   </span>
                   {isAudio && (
                     <span className="pill ml-auto shrink-0">
-                      <Volume2 size={14} aria-hidden="true" />
-                      {t('shell.soundOn')}
+                      {silenced ? <VolumeX size={14} aria-hidden="true" /> : <Volume2 size={14} aria-hidden="true" />}
+                      {silenced ? t('shell.soundBlocked') : t('shell.soundOn')}
                     </span>
                   )}
                 </div>
 
-                {/* Tile actions: revealed on hover / focus (the remote reaches them with the D-pad). */}
+                {/* Remove: revealed on hover / focus (the remote reaches it with the D-pad). */}
                 <div
                   className={clsx(
                     'absolute right-2 top-2 flex items-center gap-1.5 transition-opacity duration-d1',
                     tv ? 'opacity-0 group-focus-within:opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
                   )}
                 >
-                  {!isAudio && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveAudio(ch.url);
-                      }}
-                      className="btn btn-secondary btn-icon"
-                      aria-label={t('multi.audio')}
-                      title={t('multi.audio')}
-                    >
-                      <VolumeX size={16} aria-hidden="true" />
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={(e) => {

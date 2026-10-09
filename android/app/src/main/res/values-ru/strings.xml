@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="no_app_for_link">На этом устройстве нет приложения для этой ссылки.</string>
+    <string name="download_saved">Файл сохранён: %1$s</string>
+    <string name="download_failed">Файл не сохранён. Откройте NEOWATCH в браузере, чтобы скачать его.</string>
 
     <string name="w_direct_nom">Сейчас в эфире</string>
     <string name="w_direct_desc">Каналы в эфире прямо сейчас. Нажмите, чтобы смотреть.</string>

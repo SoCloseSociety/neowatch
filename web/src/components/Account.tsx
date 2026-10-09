@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X, LogOut, KeyRound, Download, SlidersHorizontal } from 'lucide-react';
 import { api, ApiError, adoptToken, getToken } from '@/lib/api';
 import { useAuth } from '@/store/authStore';
+import type { User } from '@/types';
 import { useUI, toast } from '@/store/uiStore';
 import { useCatalog } from '@/store/catalogStore';
 import { Button, Overline, Pill, Spinner, useEscapeClose } from './ui';
@@ -20,25 +21,37 @@ function errorText(t: TFn, e: unknown): string {
 
 const DATE_LONG: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: 'numeric' };
 
+type Section = 'plan' | 'pw' | 'data';
+type Msg = { kind: 'ok' | 'err'; text: string; at: Section };
+
 export function Account() {
   const open = useUI((s) => s.accountOpen);
   const setOpen = useUI((s) => s.setAccount);
+  const user = useAuth((s) => s.user);
+  useEscapeClose(open, () => setOpen(false));
+  if (!open || !user) return null;
+  // The form lives only while the dialog is open, and per account: typed
+  // passwords and messages never survive a close or reach the next user of a
+  // shared TV or browser (WEB-9).
+  return <AccountDialog key={user.id} user={user} />;
+}
+
+function AccountDialog({ user }: { user: User }) {
+  const setOpen = useUI((s) => s.setAccount);
   const setPricing = useUI((s) => s.setPricing);
   const setPrefs = useUI((s) => s.setPrefs);
-  const { user, logout, refresh } = useAuth();
+  const { logout, refresh } = useAuth();
   const t = useT();
   const lang = useI18n((s) => s.lang);
   const [pw, setPw] = useState({ current: '', next: '' });
   const [busy, setBusy] = useState<null | 'pw' | 'plan' | 'export' | 'delete'>(null);
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  // One message, shown in the section of the action that set it (QA-10).
+  const [msg, setMsg] = useState<Msg | null>(null);
   const [cancelAsk, setCancelAsk] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
   const [delPw, setDelPw] = useState('');
-  useEscapeClose(open, () => setOpen(false));
 
-  if (!open || !user) return null;
-
-  const close = () => { setOpen(false); setMsg(null); setCancelAsk(false); setDelOpen(false); };
+  const close = () => setOpen(false);
   const isAdmin = user.role === 'admin';
   const expiry = user.planExpires ? fmtDate(user.planExpires, DATE_LONG) : null;
   const pending = !!user.cancelAtPeriodEnd;
@@ -53,9 +66,9 @@ export function Account() {
       const r = await api.put<{ ok: boolean; token?: string }>('/auth/password', { currentPassword: pw.current, newPassword: pw.next });
       adoptToken(r.token);
       setPw({ current: '', next: '' });
-      setMsg({ kind: 'ok', text: t('pages.account.pwDone') });
+      setMsg({ kind: 'ok', text: t('pages.account.pwDone'), at: 'pw' });
     } catch (e2) {
-      setMsg({ kind: 'err', text: errorText(t, e2) });
+      setMsg({ kind: 'err', text: errorText(t, e2), at: 'pw' });
     } finally {
       setBusy(null);
     }
@@ -71,7 +84,7 @@ export function Account() {
       close();
       toast(t('pages.account.deleted'), { ok: true });
     } catch (e2) {
-      setMsg({ kind: 'err', text: errorText(t, e2) });
+      setMsg({ kind: 'err', text: errorText(t, e2), at: 'data' });
     } finally {
       setBusy(null);
     }
@@ -86,9 +99,12 @@ export function Account() {
       await refresh();
       await useCatalog.getState().loadChannels();
       setCancelAsk(false);
-      setMsg({ kind: 'ok', text: r.endsAt ? t('pages.account.cancelled', { date: fmtDate(r.endsAt, DATE_LONG) }) : t('pages.account.cancelledNow') });
+      // With an end date, the plan note above already says it (same sentence): once is enough.
+      const u = useAuth.getState().user;
+      const noted = !!(r.endsAt && u?.premium && u.cancelAtPeriodEnd && u.planExpires);
+      if (!noted) setMsg({ kind: 'ok', text: r.endsAt ? t('pages.account.cancelled', { date: fmtDate(r.endsAt, DATE_LONG) }) : t('pages.account.cancelledNow'), at: 'plan' });
     } catch (e2) {
-      setMsg({ kind: 'err', text: errorText(t, e2) });
+      setMsg({ kind: 'err', text: errorText(t, e2), at: 'plan' });
     } finally {
       setBusy(null);
     }
@@ -100,9 +116,9 @@ export function Account() {
     try {
       await api.post(`/billing/checkout?lang=${lang}`, { plan: 'premium' });
       await refresh();
-      setMsg({ kind: 'ok', text: t('pages.pricing.resumed') });
+      setMsg({ kind: 'ok', text: t('pages.pricing.resumed'), at: 'plan' });
     } catch (e2) {
-      setMsg({ kind: 'err', text: errorText(t, e2) });
+      setMsg({ kind: 'err', text: errorText(t, e2), at: 'plan' });
     } finally {
       setBusy(null);
     }
@@ -127,7 +143,7 @@ export function Account() {
       setTimeout(() => URL.revokeObjectURL(href), 10_000);
       toast(t('pages.account.exported'), { ok: true });
     } catch {
-      setMsg({ kind: 'err', text: t('pages.account.failed') });
+      setMsg({ kind: 'err', text: t('pages.account.failed'), at: 'data' });
     } finally {
       setBusy(null);
     }
@@ -193,6 +209,7 @@ export function Account() {
             <Button variant="primary" onClick={() => { close(); setPricing(true); }} className="mb-3 w-full">{t('account.upgrade')}</Button>
           )
         )}
+        <Note msg={msg} at="plan" />
 
         {user.premium && (
           <Button onClick={() => { close(); setPrefs(true); }} className="mb-4 w-full" icon={<SlidersHorizontal size={16} aria-hidden="true" />}>
@@ -210,13 +227,8 @@ export function Account() {
             {busy === 'pw' && <Spinner className="h-4 w-4" />}
             {t('pages.account.changePw')}
           </Button>
+          <Note msg={msg} at="pw" />
         </form>
-
-        {msg && (
-          <p role={msg.kind === 'err' ? 'alert' : 'status'} className={msg.kind === 'ok' ? 'mb-0 mt-3 text-sous text-mint' : 'mb-0 mt-3 text-sous text-red'}>
-            {msg.text}
-          </p>
-        )}
 
         {/* My data (GDPR) */}
         <div className="mt-4 space-y-2 border-t border-line pt-4">
@@ -242,9 +254,19 @@ export function Account() {
           ) : (
             <Button variant="quiet" onClick={() => setDelOpen(true)} className="w-full text-red">{t('account.delete')}</Button>
           )}
+          <Note msg={msg} at="data" />
         </div>
       </div>
     </div>
+  );
+}
+
+function Note({ msg, at }: { msg: Msg | null; at: Section }) {
+  if (!msg || msg.at !== at) return null;
+  return (
+    <p role={msg.kind === 'err' ? 'alert' : 'status'} className={msg.kind === 'ok' ? 'mb-3 mt-2 text-sous text-mint' : 'mb-3 mt-2 text-sous text-red'}>
+      {msg.text}
+    </p>
   );
 }
 

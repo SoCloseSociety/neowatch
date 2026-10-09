@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { clsx } from 'clsx';
-import QRCode from 'qrcode';
+import { qrDataUrl } from '@/lib/qr';
 import { X, Mail, Lock, User as UserIcon, Eye, EyeOff, Smartphone } from 'lucide-react';
 import { useAuth } from '@/store/authStore';
 import { useUI } from '@/store/uiStore';
@@ -209,7 +209,7 @@ function QrLogin({ onApproved, onEmail }: { onApproved: (token: string, user: Us
       setMinutes(Math.max(1, Math.round((r.expiresIn || 600) / 60)));
       // `t` = when the TV showed the code: the phone shows its age before confirming.
       const url = `${location.origin}/link?code=${r.userCode}&t=${Date.now()}`;
-      QRCode.toDataURL(url, { width: 320, margin: 1, color: { dark: '#05070a', light: '#ffffff' } }).then(setQr).catch(() => setQr(''));
+      qrDataUrl(url).then(setQr).catch(() => setQr(''));
       setStatus('waiting');
     } catch {
       setStatus('expired');

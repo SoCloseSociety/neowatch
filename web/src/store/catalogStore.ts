@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { api, getToken, claims } from '@/lib/api';
 import { freshChannel, stableChannel, stableId } from '@/lib/fresh';
+import { filmChannel, filmIdOfUrl, loadFilmList } from '@/lib/films';
 import { t } from '@/lib/i18n';
 import type { CatalogMeta, Channel, ChannelPage, Filters, HealthStatus } from '@/types';
 
@@ -59,7 +60,10 @@ function pushFavorites(list: Channel[]) {
 }
 
 // Auto-retry a failed grid load (WEB-24): 5 s, 10 s, 20 s, 40 s, then every 60 s.
-const RETRY_DELAYS_MS = [5_000, 10_000, 20_000, 40_000, 60_000];
+// The catalog meta (filters, status) and Home's rows use the same steps (WEB-6).
+export const RETRY_DELAYS_MS = [5_000, 10_000, 20_000, 40_000, 60_000];
+let metaRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let metaRetryCount = 0;
 let loadRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let loadRetryCount = 0;
 function cancelLoadRetry() {
@@ -171,11 +175,22 @@ export const useCatalog = create<CatalogState>((set, get) => ({
   gen: 0,
 
   loadMeta: async () => {
+    if (metaRetryTimer) clearTimeout(metaRetryTimer);
+    metaRetryTimer = null;
     try {
       const meta = await api.get<CatalogMeta>('/catalog/meta');
+      metaRetryCount = 0;
       set({ meta, metaError: false });
     } catch {
       set({ metaError: true });
+      // A TV switched on before its Wi-Fi: the filters and the status come back on
+      // their own (and at once on 'online', below).
+      const delay = RETRY_DELAYS_MS[Math.min(metaRetryCount, RETRY_DELAYS_MS.length - 1)];
+      metaRetryCount++;
+      metaRetryTimer = setTimeout(() => {
+        metaRetryTimer = null;
+        if (get().metaError) get().loadMeta();
+      }, delay);
     }
   },
 
@@ -330,6 +345,13 @@ export const useCatalog = create<CatalogState>((set, get) => ({
     const worker = async () => {
       while (queue.length) {
         const url = queue.shift() as string;
+        // A film is not in the catalog: rebuild it from the film list (QA-5).
+        const filmId = filmIdOfUrl(url);
+        if (filmId) {
+          const f = (await loadFilmList()).find((x) => x.id === filmId);
+          if (f) resolved.push(filmChannel(f, url));
+          continue;
+        }
         const stub = { id: stableId(url), url } as Channel; // the rest comes from the server
         const ch = await freshChannel(stub, { force: true });
         if (ch !== stub && ch.name) resolved.push(ch);
@@ -370,4 +392,11 @@ export function applyClientFilters(channels: Channel[], filters: Filters, health
   // Strict: show only channels confirmed reachable (probes resolve within seconds).
   if (filters.onlineOnly) list = list.filter((c) => health[c.url] === 'online');
   return list;
+}
+
+// Back online: a failed meta load is retried now, not at the next backoff step.
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    if (useCatalog.getState().metaError) useCatalog.getState().loadMeta();
+  });
 }

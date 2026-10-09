@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { gunzipSync } from 'node:zlib';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -7,6 +7,7 @@ import { config } from './config.js';
 import { safeFetch } from './netguard.js';
 import { getByChannelId } from './catalog.js';
 import { rateLimit } from './ratelimit.js';
+import { readJsonArray } from './util.js';
 
 // EPG (electronic program guide) from XMLTV sources. Most IPTV providers ship
 // an XMLTV (epg.xml / xmltv.php, often gzipped) alongside their M3U; programmes
@@ -24,6 +25,9 @@ const EPG_REFRESH_MS = 6 * 60 * 60 * 1000; // re-fetch the hosted guide every 6h
 const EPG_RETRY_MS = 15 * 60 * 1000;       // a failed source is retried sooner
 const NAME_MAX = 80;
 const URL_MAX = 2048;
+// Whole fetch (headers + body): the agent's bodyTimeout only bounds the silence between
+// chunks, so a provider dripping a byte every 20 s held the rebuild queue forever.
+const FETCH_DEADLINE_MS = 180_000;
 let refreshTimer = null;
 let retryTimer = null;
 // Last good parse per source id: a failed fetch (provider blip, a refresh racing the
@@ -34,11 +38,13 @@ let epgSources = [];                 // [{ id, name, url, addedAt, count, lastEr
 let byChannel = new Map();           // channelId -> [{ start, stop, title, desc }] sorted by start
 let flat = [];                       // [{ id(channelId), title, n(normalized title), start, stop }] for programme search
 let loaded = false;
+let storeBroken = false; // epg.json unreadable/corrupt at boot: never save over it
 
 // The caller gets this write's outcome; the queue itself never stays rejected (one
 // failed write must not skip every later save).
 let writeChain = Promise.resolve();
 function save() {
+  if (storeBroken) return Promise.reject(new Error(`${EPG_FILE} was unreadable at boot; not overwriting it (repair it and restart)`));
   const p = writeChain.then(async () => {
     await mkdir(config.dataDir, { recursive: true }).catch(() => {});
     const tmp = `${EPG_FILE}.${randomUUID()}.tmp`;
@@ -140,8 +146,19 @@ export function parseXmltv(xml) {
 }
 
 async function fetchXmltv(url) {
+  // One deadline for headers + body (the signal also aborts reader.read()).
+  const signal = AbortSignal.timeout(FETCH_DEADLINE_MS);
+  try {
+    return await fetchXmltvBody(url, signal);
+  } catch (e) {
+    if (signal.aborted) throw new Error(`timed out after ${FETCH_DEADLINE_MS / 1000} s`);
+    throw e;
+  }
+}
+
+async function fetchXmltvBody(url, signal) {
   // safeFetch re-validates every redirect hop (SSRF).
-  const res = await safeFetch(url, { headers: { 'User-Agent': 'NEOWATCH/1.0' } }, { allowPrivate: config.allowPrivateSources });
+  const res = await safeFetch(url, { headers: { 'User-Agent': 'NEOWATCH/1.0' }, signal }, { allowPrivate: config.allowPrivateSources });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const len = Number(res.headers.get('content-length') || 0);
   if (len > MAX_XMLTV_BYTES) {
@@ -188,8 +205,19 @@ function reindex(perSourceMaps) {
     if (n === undefined) { n = norm(t); normed.set(t, n); }
     return n;
   };
-  for (const [ch, list] of merged) {
-    list.sort((a, b) => a.start - b.start);
+  for (const [ch, raw] of merged) {
+    raw.sort((a, b) => a.start - b.start);
+    // Two sources (or two @feeds of one channel, which normEpgId folds together) list the
+    // same show: keep it once (same start + same normalized title). The duplicates used
+    // to fill the /epg/day and grid caps with past shows.
+    const seen = new Set();
+    const list = raw.filter((p) => {
+      const k = `${p.start}|${nOf(p.title)}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    merged.set(ch, list);
     for (const p of list) flatArr.push({ id: ch, title: p.title, n: nOf(p.title), start: p.start, stop: p.stop });
   }
   byChannel = merged;
@@ -197,6 +225,13 @@ function reindex(perSourceMaps) {
 }
 
 const mapTotal = (map) => { let n = 0; for (const l of map.values()) n += l.length; return n; };
+
+// Index from the CURRENT source list: a source deleted while a fetch ran must not come back.
+function reindexCurrent() {
+  const live = new Set(epgSources.map((s) => s.id));
+  for (const id of lastGood.keys()) if (!live.has(id)) lastGood.delete(id);
+  reindex(epgSources.map((s) => lastGood.get(s.id)).filter(Boolean));
+}
 
 // force = re-fetch URL sources; otherwise a source already parsed (lastGood) is reused,
 // so a delete or an add never re-downloads the others. A failed fetch keeps the source's
@@ -221,12 +256,9 @@ async function doRebuild(force) {
     lastGood.set(src.id, map);
     src.count = mapTotal(map);
   }
-  // Index from the CURRENT list: a source deleted while we were fetching must not come back.
-  const live = new Set(epgSources.map((s) => s.id));
-  for (const id of lastGood.keys()) if (!live.has(id)) lastGood.delete(id);
-  reindex(epgSources.map((s) => lastGood.get(s.id)).filter(Boolean));
+  reindexCurrent();
   if (failed) scheduleRetry();
-  await save();
+  if (!storeBroken) await save(); // a broken store refreshes in memory only
   return flat.length;
 }
 
@@ -259,11 +291,11 @@ function ensureRefreshTimer() {
 
 export async function initEpg() {
   if (!loaded) {
-    try {
-      epgSources = JSON.parse(await readFile(EPG_FILE, 'utf8'));
-    } catch {
-      epgSources = [];
-    }
+    // Only a missing file is "no sources"; a corrupt one is kept as is (never saved over).
+    const { data } = await readJsonArray(EPG_FILE, 'epg');
+    epgSources = data || [];
+    storeBroken = !data;
+    if (storeBroken) console.error(`  [epg] changes will NOT be saved (the file is kept as is) until it is repaired and the server restarted.\n`);
     loaded = true;
   }
   // Seed a default XMLTV source (operator-provided) if none configured yet.
@@ -321,15 +353,25 @@ epgPublicRouter.get('/epg/now', (req, res) => {
 export const hasEpg = (channelId) => byChannel.has(normEpgId(channelId));
 
 // Today's schedule (now -3h .. +26h) for one channel, capped. Shared by /epg/day + the grid.
+// The cap keeps what is airing and coming up: at most a quarter of it goes to past shows
+// (the newest ones), the rest fills forward from the first programme not yet over. Taking
+// the first N from now -3h cut dense guides (15 min slots) before the current show.
 export function epgDay(channelId, cap = 60) {
   const list = channelId ? byChannel.get(normEpgId(channelId)) : null;
   if (!list || !list.length) return [];
   const now = Date.now();
   const from = now - 3 * 3600000;
   const to = now + 26 * 3600000;
-  return list
-    .filter((p) => (p.stop || p.start + 3600000) > from && p.start < to)
-    .slice(0, cap)
+  const end = (p) => p.stop || p.start + 3600000;
+  const win = list.filter((p) => end(p) > from && p.start < to);
+  let first = 0;
+  if (win.length > cap) {
+    let cur = win.findIndex((p) => end(p) > now);
+    if (cur === -1) cur = win.length;
+    first = Math.max(0, Math.min(cur - Math.floor(cap / 4), win.length - cap));
+  }
+  return win
+    .slice(first, first + cap)
     .map((p) => ({ start: p.start, stop: p.stop, title: p.title, desc: p.desc || null }));
 }
 
@@ -349,7 +391,15 @@ epgPublicRouter.get('/epg/search', searchLimit, (req, res) => {
   if (q.length < 2 || !flat.length) return res.json({ results: [], enabled: epgEnabled() });
   const now = Date.now();
   const horizon = now + 7 * 24 * 3600 * 1000; // next 7 days
-  const results = [];
+  // Every match within the scan cap is gathered, THEN sorted (live first, then by start)
+  // and cut: cutting at 60 while walking `flat` (grouped by channel) kept the first
+  // channel's reruns and dropped shows airing now elsewhere. At most PER_CHANNEL per
+  // channel (its earliest: `flat` is sorted by start within a channel, so a live one is
+  // among them), so one channel's week of reruns cannot fill the list or the sort.
+  const RESULTS_MAX = 60;
+  const PER_CHANNEL = 5;
+  const matches = [];
+  const perChannel = new Map();
   let scanned = 0;
   const MAX_SCAN = 200_000; // hard cap so a rare-term query can't pin a CPU
   for (const p of flat) {
@@ -357,20 +407,15 @@ epgPublicRouter.get('/epg/search', searchLimit, (req, res) => {
     const end = p.stop || p.start + 3600000;
     if (end < now || p.start > horizon) continue;
     if (!p.n.includes(q)) continue;
-    // Join to a catalog channel so the result is playable (and labelled).
-    const ch = getByChannelId(p.id);
-    if (!ch) continue;
-    results.push({
-      channelId: p.id,
-      channel: ch,
-      title: p.title,
-      start: p.start,
-      stop: p.stop,
-      live: p.start <= now && now < end,
-    });
-    if (results.length >= 60) break;
+    let c = perChannel.get(p.id);
+    // Join to a catalog channel (once per channel) so the result is playable and labelled.
+    if (!c) { c = { n: 0, ch: getByChannelId(p.id) }; perChannel.set(p.id, c); }
+    if (!c.ch || c.n >= PER_CHANNEL) continue;
+    c.n++;
+    matches.push({ channelId: p.id, channel: c.ch, title: p.title, start: p.start, stop: p.stop, live: p.start <= now && now < end });
   }
-  results.sort((a, b) => Number(b.live) - Number(a.live) || a.start - b.start);
+  matches.sort((a, b) => Number(b.live) - Number(a.live) || a.start - b.start);
+  const results = matches.slice(0, RESULTS_MAX);
   res.json({ results, enabled: epgEnabled() });
 });
 
@@ -384,6 +429,12 @@ epgPublicRouter.get('/epg/sources', (_req, res) =>
 
 export const epgAdminRouter = Router();
 
+// A broken epg.json (kept as is at boot) refuses every change up front: indexing into
+// memory and then failing the save showed a guide that vanished at the next restart.
+const storeWritable = (_req, res, next) => (storeBroken
+  ? res.status(503).json({ error: 'epg.json is unreadable: repair it and restart the server' })
+  : next());
+
 const pubEpg = () => epgSources.map((s) => ({
   id: s.id, name: s.name, url: s.url || null, count: s.count || 0, lastError: s.lastError || null, lastFetched: s.lastFetched || null,
 }));
@@ -391,7 +442,7 @@ const pubEpg = () => epgSources.map((s) => ({
 // Admin list, with urls + errors (GET /api/admin/epg).
 epgAdminRouter.get('/epg', (_req, res) => res.json({ enabled: epgEnabled(), sources: pubEpg() }));
 
-epgAdminRouter.post('/epg', wrap(async (req, res) => {
+epgAdminRouter.post('/epg', storeWritable, wrap(async (req, res) => {
   const { name, url, text } = req.body || {};
   if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name required' });
   const label = name.trim().slice(0, NAME_MAX);
@@ -414,17 +465,21 @@ epgAdminRouter.post('/epg', wrap(async (req, res) => {
   } catch (e) {
     return res.status(400).json({ error: `could not import EPG: ${String(e?.message || e)}` });
   }
-  await rebuild();
+  // The new guide is already parsed: index + save now, without queueing behind a refresh
+  // that may still be downloading (a running rebuild indexes the current list when done).
+  reindexCurrent();
+  await save();
   ensureRefreshTimer();
   res.json({ sources: pubEpg() });
 }));
 
-epgAdminRouter.delete('/epg/:id', wrap(async (req, res) => {
+epgAdminRouter.delete('/epg/:id', storeWritable, wrap(async (req, res) => {
   const before = epgSources.length;
   epgSources = epgSources.filter((s) => s.id !== req.params.id);
   if (epgSources.length === before) return res.status(404).json({ error: 'not found' });
   lastGood.delete(req.params.id);
-  await rebuild();
+  reindexCurrent(); // at once, not after a refresh still in flight
+  await save();
   res.json({ ok: true });
 }));
 

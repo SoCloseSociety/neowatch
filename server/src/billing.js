@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { config } from './config.js';
 import { rateLimit } from './ratelimit.js';
+import { readJsonArray } from './util.js';
 import {
   updateBilling, findUserById, findByStripeCustomer, sanitize, requireUser, isPremium, onBeforeUserDelete,
 } from './auth.js';
@@ -360,11 +361,10 @@ const EVENTS_MAX = 2000;
 let seenEvents = null; // Set, loaded lazily on the first webhook
 async function loadSeen() {
   if (seenEvents) return;
-  try {
-    seenEvents = new Set(JSON.parse(await readFile(EVENTS_FILE, 'utf8')));
-  } catch {
-    seenEvents = new Set();
-  }
+  // A bounded dedup cache, not account data: a corrupt file is kept as a .bak copy (logged
+  // loudly by readJsonArray) and the cache restarts, so webhooks keep being processed.
+  const { data } = await readJsonArray(EVENTS_FILE, 'billing');
+  seenEvents = new Set((data || []).filter((x) => typeof x === 'string'));
 }
 let eventsChain = Promise.resolve();
 function markSeen(id) {

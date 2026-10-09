@@ -2,7 +2,7 @@ import { clsx } from 'clsx';
 import { useEffect, useState, type ButtonHTMLAttributes, type ImgHTMLAttributes, type ReactNode } from 'react';
 import type { HealthStatus } from '@/types';
 import { useT } from '@/lib/i18n';
-import { imgSrc } from '@/lib/img';
+import { imgSrc, type ImgW } from '@/lib/img';
 import { useUI } from '@/store/uiStore';
 
 // Design primitives (Sentinel TV OS, DESIGN-SPEC sections 1.2 and 2.9-2.11).
@@ -13,11 +13,33 @@ import { useUI } from '@/store/uiStore';
 
 /** A third-party logo through the image relay (lib/img.ts); `fallback` when there is
  *  none or it fails to load (404, refused, not an image). */
-export function LogoImg({ src, fallback, ...rest }: { src: string | null | undefined; fallback: ReactNode } & Omit<ImgHTMLAttributes<HTMLImageElement>, 'src' | 'onError'>) {
-  const url = imgSrc(src);
+/** `w`: the relay rendition (imgSrc), separate from the displayed `width`. */
+export function LogoImg({ src, fallback, w, ...rest }: { src: string | null | undefined; fallback: ReactNode; w?: ImgW } & Omit<ImgHTMLAttributes<HTMLImageElement>, 'src' | 'onError'>) {
+  const url = imgSrc(src, w);
   const [failed, setFailed] = useState<string | null>(null);
   if (!url || failed === url) return <>{fallback}</>;
   return <img alt="" decoding="async" referrerPolicy="no-referrer" {...rest} src={url} onError={() => setFailed(url)} />;
+}
+
+/** A hero's category artwork (public/ambiance/<name>.webp, 1920 px, plus a 960 px
+ *  copy for phones). It is the page's largest paint, so it is a real <img> in the
+ *  document, fetched first, not a CSS background set from script (PERF-4).
+ *  Decorative: no alt, hidden from assistive tech, never focusable. */
+export function AmbianceImg({ name, sizes, className }: { name: string; sizes: string; className?: string }) {
+  return (
+    <img
+      src={`/ambiance/${name}.webp`}
+      srcSet={`/ambiance/${name}-960.webp 960w, /ambiance/${name}.webp 1920w`}
+      sizes={sizes}
+      alt=""
+      aria-hidden="true"
+      decoding="async"
+      draggable={false}
+      // React 18 does not know fetchPriority: the lowercase attribute reaches the DOM as is.
+      {...{ fetchpriority: 'high' }}
+      className={clsx('pointer-events-none h-full w-full select-none object-cover object-center', className)}
+    />
+  );
 }
 
 // Close a modal on Escape (call before any early return to satisfy hook rules).
@@ -122,7 +144,8 @@ export function HealthPill({ status, geo, className }: { status: HealthStatus; g
   }
   if (status === 'offline') {
     return (
-      <Pill className={clsx('text-ink-2', className)}>
+      // Full ink: an off-air card is dimmed to .72, a secondary ink would fall under 4.5:1.
+      <Pill className={clsx('text-ink', className)}>
         <span aria-hidden="true">○</span>
         {t('pill.offAir')}
       </Pill>
@@ -203,7 +226,8 @@ export function ToastHost() {
   const toasts = useUI((s) => s.toasts);
   const dismiss = useUI((s) => s.dismissToast);
   const t = useT();
-  if (!toasts.length) return null;
+  // The live region is always in the DOM (empty when idle): one inserted along
+  // with its first message is often not announced (WEB-15).
   return (
     <div
       role="status"

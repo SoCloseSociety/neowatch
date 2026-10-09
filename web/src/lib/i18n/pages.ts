@@ -79,6 +79,9 @@ export const pages = {
   'pages.link.cancel': { en: 'Go back', fr: 'Revenir', ru: 'Назад' },
   'pages.link.donePill': { en: 'CONNECTED', fr: 'CONNECTÉE', ru: 'ПОДКЛЮЧЁН' },
   'pages.link.doneHint': { en: 'Changing your password signs every TV out.', fr: 'Changer votre mot de passe déconnecte toutes les TV.', ru: 'Смена пароля отключит все ТВ.' },
+  'pages.link.enterHow': { en: 'Type the code shown on the TV.', fr: 'Saisissez le code affiché sur la TV.', ru: 'Введите код с экрана ТВ.' },
+  'pages.link.codeLabel': { en: 'TV code', fr: 'Code de la TV', ru: 'Код ТВ' },
+  'pages.link.codeGo': { en: 'Continue', fr: 'Continuer', ru: 'Продолжить' },
   'pages.link.invalidBody': { en: 'Show a new code on the TV, then scan again.', fr: 'Affichez un nouveau code sur la TV, puis scannez.', ru: 'Покажите новый код на ТВ и сканируйте снова.' },
 
   // ── My account ──
@@ -119,7 +122,6 @@ export const pages = {
   'pages.settings.compact': { en: 'Compact', fr: 'Compacte', ru: 'Плотно' },
   'pages.settings.tvStyle': { en: 'On a TV, NEOWATCH always uses the Lunar style.', fr: 'Sur une TV, NEOWATCH utilise toujours le style Lunaire.', ru: 'На ТВ NEOWATCH всегда в стиле «Лунный».' },
   'pages.settings.muted': { en: 'Start with the sound off', fr: 'Démarrer sans le son', ru: 'Начинать без звука' },
-  'pages.settings.autoplay': { en: 'Play as soon as a channel opens', fr: 'Lire dès qu’une chaîne s’ouvre', ru: 'Играть сразу при открытии канала' },
   'pages.settings.relay': { en: 'Always play through our server', fr: 'Toujours lire via notre serveur', ru: 'Всегда через наш сервер' },
   'pages.settings.relayHint': { en: 'Helps on networks that block TV. Can be slower.', fr: 'Utile sur les réseaux qui bloquent la TV. Parfois plus lent.', ru: 'Помогает, если сеть блокирует ТВ. Может быть медленнее.' },
   'pages.settings.offAir': { en: 'Show channels that are off air', fr: 'Afficher les chaînes hors antenne', ru: 'Показывать каналы не в эфире' },
@@ -245,5 +247,7 @@ export const pages = {
   'pages.admin.pasted': { en: 'pasted playlist', fr: 'playlist collée', ru: 'вставленный плейлист' },
   'pages.admin.guide': { en: 'TV guide sources', fr: 'Sources du guide TV', ru: 'Источники программы' },
   'pages.admin.guideHint': { en: 'Add a guide link (.xml or .gz) for now and next.', fr: 'Ajoutez un lien de guide (.xml ou .gz).', ru: 'Добавьте ссылку на программу (.xml или .gz).' },
-  'pages.admin.programmes': { en: '{n} programmes', fr: '{n} programmes', ru: 'передач: {n}' },
+  // Plural base: t.n('pages.admin.programmes', n)
+  'pages.admin.programmes.one': { en: '{n} programme', fr: '{n} programme', ru: 'передач: {n}' },
+  'pages.admin.programmes.other': { en: '{n} programmes', fr: '{n} programmes', ru: 'передач: {n}' },
 } satisfies Dict;

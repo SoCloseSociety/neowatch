@@ -1,5 +1,5 @@
-// Small shared helpers used by the catalog and the custom-sources modules.
-import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
+// Small shared helpers used by the catalog, the custom-sources, EPG and auth modules.
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -52,5 +52,31 @@ export async function writeFileAtomic(file, data) {
   } catch (err) {
     await unlink(tmp).catch(() => {});
     throw err;
+  }
+}
+
+// Read a JSON-array store (users.json, sources.json, epg.json...). A missing file is an
+// empty store: { data: [] }. ANY other outcome (unreadable file, a stray byte from a hand
+// edit, not an array) is never read as "empty": the file is copied to
+// <file>.corrupt-<ts>.bak, the error is logged loudly and { data: null, error } comes back.
+// The caller decides (users, sources, EPG: never save over it; a mere cache may restart).
+export async function readJsonArray(file, tag) {
+  let raw;
+  try {
+    raw = await readFile(file, 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return { data: [] };
+    console.error(`\n  [${tag}] CANNOT READ ${file} (${err?.code || ''} ${err?.message || err}).\n`);
+    return { data: null, error: err };
+  }
+  try {
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data)) throw new Error('not a JSON array');
+    return { data };
+  } catch (err) {
+    const bak = `${file}.corrupt-${Date.now()}.bak`;
+    await copyFile(file, bak).catch(() => {});
+    console.error(`\n  [${tag}] CORRUPT ${file} (${err.message}). Copy kept at ${bak}.\n`);
+    return { data: null, error: err };
   }
 }

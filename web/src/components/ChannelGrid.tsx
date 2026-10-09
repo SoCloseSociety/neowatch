@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { clsx } from 'clsx';
 import { CloudOff, SearchX, Tv } from 'lucide-react';
 import { useCatalog, applyClientFilters } from '@/store/catalogStore';
@@ -27,14 +27,14 @@ export function ChannelGrid({ onPlay }: { onPlay: PlayFn }) {
   const error = useCatalog((s) => s.error);
   const page = useCatalog((s) => s.page);
   const pages = useCatalog((s) => s.pages);
-  const loadMore = useCatalog((s) => s.loadMore);
   const checkHealth = useCatalog((s) => s.checkHealth);
   const setFilters = useCatalog((s) => s.setFilters);
   const resetFilters = useCatalog((s) => s.resetFilters);
   const density = useSettings((s) => s.density);
   const showOffline = useSettings((s) => s.showOffline);
   const hiddenCategories = usePrefs((s) => s.prefs.hiddenCategories);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const sentinelEl = useRef<HTMLDivElement | null>(null);
+  const observer = useRef<IntersectionObserver | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const t = useT();
 
@@ -90,19 +90,35 @@ export function ChannelGrid({ onPlay }: { onPlay: PlayFn }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channels]);
 
-  // Infinite scroll.
-  useEffect(() => {
-    const el = sentinelRef.current;
+  // Infinite scroll. A callback ref: the sentinel unmounts while a new list
+  // loads (skeletons) and a NEW node mounts after, even when page / pages are
+  // unchanged (same page count, Retry, Online only): observe whichever node is
+  // there (WEB-1). The store is read at intersection time, never a stale render.
+  const sentinelRef = useCallback((el: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    sentinelEl.current = el;
     if (!el) return;
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && page < pages && !loadingMore) loadMore();
+        const s = useCatalog.getState();
+        if (entries[0]?.isIntersecting && s.page < s.pages && !s.loadingMore && !s.loading) s.loadMore();
       },
       { rootMargin: '600px' }
     );
     io.observe(el);
-    return () => io.disconnect();
-  }, [page, pages, loadingMore, loadMore]);
+    observer.current = io;
+  }, []);
+  // A page landed and the sentinel is still in view (tall screen): observing it
+  // again reports it at once, so the next page loads.
+  useEffect(() => {
+    const el = sentinelEl.current;
+    const io = observer.current;
+    if (!el || !io || loadingMore) return;
+    io.unobserve(el);
+    io.observe(el);
+  }, [page, pages, loadingMore]);
+  useEffect(() => () => observer.current?.disconnect(), []);
 
   const gridClass = clsx('grid gap-x-[var(--ecart-cartes)] gap-y-[calc(var(--ecart-cartes)_+_4px)]', DENSITY[density]);
 

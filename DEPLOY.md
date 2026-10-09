@@ -13,7 +13,9 @@ owner's explicit go-ahead.
 - **Static web:** `web/dist` served by host **nginx** from `/var/www/neowatch`, plus files written
   on the VPS: `epg.xml.gz` (nightly guide) and `app.apk` (Android shell).
 - **nginx vhost:** `/etc/nginx/sites-enabled/neowatch.soclose.co`: serves static, proxies `/api/` to
-  `127.0.0.1:8790` (`proxy_buffering off` for live streams), gzip for js/css/json/svg/manifest.
+  `127.0.0.1:8790` (`proxy_buffering off` for live streams), gzip for js/css/json/svg. The web
+  manifest and the woff2 fonts go out as `application/octet-stream` (the manifest is therefore
+  not gzipped) until the "Static files" lines of the nginx checklist below are applied.
   TLS by Let's Encrypt (certbot `--nginx`, `certbot.timer`). HTTP -> HTTPS 301.
 - **Guide grabber:** `/root/epg/` (`grab.sh`, `curate-fr.sh`, `merge.mjs`, `curated/`, the
   iptv-org/epg clone in `epg/`), cron `12 4 * * * /root/epg/grab.sh >> /root/epg/grab.log 2>&1`.
@@ -115,6 +117,50 @@ Do not add `includeSubDomains`/`preload` without checking every `*.neowatch.socl
 The stream proxy sets its own sandbox CSP on relayed bytes; these headers do not affect playback.
 Check after reload: `curl -sI https://neowatch.soclose.co/ | grep -iE "x-frame|content-security|nosniff|strict-transport|referrer"`.
 
+Simplest way to repeat them: put the five lines above in `/etc/nginx/snippets/neowatch-headers.conf`
+and write `include snippets/neowatch-headers.conf;` in the `server` block and in every location
+below that has its own `add_header`.
+
+**HTML must revalidate (stale app after a deploy).** Today nginx sends the HTML (`/`, every SPA
+route through the `/index.html` fallback) with an ETag and no `Cache-Control`, so browsers apply
+heuristic freshness (about 10% of the file's age, hours for a day-old file) and the service
+worker's navigation fetch gets the cached copy. After a deploy that old `index.html` asks for
+hashed chunks `rsync --delete` removed: `vite:preloadError`, one reload, the same stale page,
+then the crash screen. `/assets/` (hashed) stays `immutable`; only the HTML changes:
+
+```nginx
+# Every .html, including /index.html reached by "index" or the try_files fallback
+# (an internal redirect runs the location match again).
+location ~ \.html$ {
+    add_header Cache-Control "no-cache" always;
+    include snippets/neowatch-headers.conf;
+}
+```
+
+Check: `curl -sI https://neowatch.soclose.co/chaine/x | grep -i cache-control` -> `no-cache`
+(same for `/`), and the security headers are still there.
+
+**Static files (types, gzip, art caching).**
+- MIME types: if `grep -nE "woff2|webmanifest" /etc/nginx/mime.types` lacks them, add
+  `application/manifest+json webmanifest;` and `font/woff2 woff2;` INSIDE the `types { }` block of
+  `/etc/nginx/mime.types` (correct for every vhost). Never write a `types { }` block in the vhost's
+  `server`: it replaces the whole inherited map (HTML would go out as the default type).
+- gzip: append `application/manifest+json` to the `gzip_types` line in use (`grep -rn gzip_types
+  /etc/nginx/`). A `gzip_types` in the vhost replaces the inherited list: keep the existing types.
+- The art in `web/public` has fixed names (not hashed), so cache it for a week, not forever (a
+  replaced tile shows up within 7 days):
+
+```nginx
+location ~* ^/(ambiance/|tiles/|hero\.webp$) {
+    add_header Cache-Control "public, max-age=604800" always;
+    include snippets/neowatch-headers.conf;
+}
+```
+
+Check: `curl -sI -H 'Accept-Encoding: gzip' https://neowatch.soclose.co/manifest.webmanifest`
+-> `application/manifest+json` + `content-encoding: gzip`; `curl -sI .../tiles/news.webp` ->
+`max-age=604800`; a woff2 under `/assets/` -> `font/woff2`, still `immutable`.
+
 ## Enabling real payments (Stripe): code is ready, keys are pending
 In `/root/neowatch/.env`: `BILLING_PROVIDER=stripe`, `STRIPE_SECRET=sk_live_...`,
 `STRIPE_PRICE_ID=price_...` (a recurring price), `STRIPE_WEBHOOK_SECRET=whsec_...`, then
@@ -145,7 +191,10 @@ app and `assetlinks.json` stays valid. `twa-manifest.json` is legacy (kept for h
    `python3 -I android/tools/check_widgets.py` prints OK): see `android/README.md`.
 3. Owner go-ahead, then publish:
    `bash scripts/deploy.sh --apk android/app/build/outputs/apk/release/app-release.apk`
-   (the previous APK is kept in the rollback copy).
+   (the previous APK is kept in the rollback copy). No page links to `/app.apk` yet: the
+   install panel shows "Get the TV app" only when `/api/config` carries `androidApk`, and no
+   server setting sends it today. Share `https://neowatch.soclose.co/app.apk` directly until
+   that setting exists.
 4. Tell **Sentinel House** (`androidtv.py` `NAVIGATEURS_DE_TWA`, `media.py` `LIMITE_TWA`) that the
    app is now a WebView shell.
 

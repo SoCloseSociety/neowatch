@@ -9,7 +9,9 @@ import { Button, EmptyState, Overline, Pill, Spinner } from './ui';
 
 const CODE_TTL_MS = 10 * 60 * 1000;
 
-// Phone side of QR pairing: opened by scanning the TV's QR (/link?code=XXXXXX&t=<ms>).
+// Phone side of QR pairing: opened by scanning the TV's QR (/link?code=XXXXXX&t=<ms>),
+// or typed: the TV also says "or open <host>/link" with the code, so /link alone
+// asks for it (QA-2).
 // Approving gives the TV that shows this code a session on THIS account, so the page
 // says it plainly and asks twice (SEC-2): a link received from someone else would sign
 // THEIR TV in to your account. `t` (set by our TV) shows how old the code is.
@@ -24,13 +26,18 @@ export function LinkDevice() {
   const shownAt = Number(params.get('t')) || 0;
   const [step, setStep] = useState<'review' | 'confirm' | 'sending' | 'done' | 'invalid'>('review');
   const [valid, setValid] = useState<boolean | null>(null);
+  const [typed, setTyped] = useState('');
   const [, tick] = useState(0);
 
   useEffect(() => {
+    setStep('review');
     if (!code) { setValid(false); return; }
+    let alive = true;
+    setValid(null);
     api.get<{ valid: boolean }>(`/auth/device/info?code=${encodeURIComponent(code)}`)
-      .then((r) => setValid(r.valid))
-      .catch(() => setValid(false));
+      .then((r) => { if (alive) setValid(r.valid); })
+      .catch(() => { if (alive) setValid(false); });
+    return () => { alive = false; };
   }, [code]);
 
   // Keep the code age current while the page is open.
@@ -71,12 +78,41 @@ export function LinkDevice() {
 
   if (!ready || (code && valid === null)) return shell(<div className="flex justify-center py-6"><Spinner /></div>);
 
-  if (!code || valid === false || step === 'invalid') {
+  // No code in the address: type the one the TV shows (6 characters), then the
+  // same check and the same two-step confirmation as a scanned QR.
+  if (!code) {
+    const submit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (typed.length === 6) navigate(`/link?code=${encodeURIComponent(typed)}`);
+    };
+    return shell(
+      <form onSubmit={submit} className="flex flex-col gap-3">
+        <label htmlFor="link-code" className="m-0 text-corps text-ink-2">{t('pages.link.enterHow')}</label>
+        <input
+          id="link-code"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
+          aria-label={t('pages.link.codeLabel')}
+          autoComplete="one-time-code"
+          autoCapitalize="characters"
+          autoCorrect="off"
+          spellCheck={false}
+          maxLength={6}
+          data-autofocus=""
+          translate="no"
+          className="input w-full font-mono text-titre2 font-semibold uppercase tracking-[0.3em]"
+        />
+        <Button type="submit" variant="primary" disabled={typed.length !== 6} className="w-full">{t('pages.link.codeGo')}</Button>
+      </form>
+    );
+  }
+
+  if (valid === false || step === 'invalid') {
     return shell(
       <EmptyState
         className="py-6"
         icon={<AlertTriangle size={28} />}
-        title={code ? t('link.invalid') : t('link.noCode')}
+        title={t('link.invalid')}
         body={t('pages.link.invalidBody')}
         action={{ label: t('empty.backToChannels'), onClick: () => navigate('/'), variant: 'primary' }}
       />

@@ -84,9 +84,14 @@ public class WidgetConfigActivity extends Activity {
         if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) { finish(); return; }
         genre = WidgetBase.genreDe(this, widgetId);
         if (genre.isEmpty()) { finish(); return; }
-        choisies.addAll(Widgets.choisies(this, widgetId));
-        style = Widgets.style(this, widgetId);
-        logos = Widgets.logos(this, widgetId);
+        if (b != null && b.getStringArray(ETAT_IDS) != null) {
+            // Recreated (rotation, fold, dark-mode switch) before Done: keep the unsaved choices.
+            restaurer(b);
+        } else {
+            choisies.addAll(Widgets.choisies(this, widgetId));
+            style = Widgets.style(this, widgetId);
+            logos = Widgets.logos(this, widgetId);
+        }
         if (Build.VERSION.SDK_INT >= 26) {
             try {
                 sans = getResources().getFont(R.font.plex_sans);
@@ -123,6 +128,7 @@ public class WidgetConfigActivity extends Activity {
             if (sans != null) champ.setTypeface(sans);
             champ.setBackgroundResource(R.drawable.w_champ);
             champ.setPadding(dp(14), dp(12), dp(14), dp(12));
+            if (b != null) champ.setText(b.getString(ETAT_Q, ""));   // before the watcher: no extra search
             LinearLayout.LayoutParams lc = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             lc.topMargin = dp(18);
             champ.setLayoutParams(lc);
@@ -185,6 +191,45 @@ public class WidgetConfigActivity extends Activity {
             dessinerChoisies();
             chercherMaintenant();
         }
+    }
+
+    // ------------------------------------------------------------------ recreation (no configChanges)
+
+    private static final String ETAT_IDS = "cfg.ids", ETAT_CIDS = "cfg.cids", ETAT_NOMS = "cfg.noms",
+            ETAT_STYLE = "cfg.style", ETAT_LOGOS = "cfg.logos", ETAT_Q = "cfg.q";
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        int n = choisies.size();
+        String[] ids = new String[n], cids = new String[n], noms = new String[n];
+        for (int k = 0; k < n; k++) {
+            Widgets.Choix c = choisies.get(k);
+            ids[k] = c.id;
+            cids[k] = c.channelId;
+            noms[k] = c.nom;
+        }
+        out.putStringArray(ETAT_IDS, ids);
+        out.putStringArray(ETAT_CIDS, cids);
+        out.putStringArray(ETAT_NOMS, noms);
+        out.putString(ETAT_STYLE, style.name());
+        out.putBoolean(ETAT_LOGOS, logos);
+        if (champ != null) out.putString(ETAT_Q, champ.getText().toString());
+    }
+
+    private void restaurer(Bundle b) {
+        String[] ids = b.getStringArray(ETAT_IDS), cids = b.getStringArray(ETAT_CIDS), noms = b.getStringArray(ETAT_NOMS);
+        for (int k = 0; ids != null && k < ids.length && choisies.size() < maxChoix(); k++) {
+            if (!Widgets.idValide(ids[k])) continue;
+            choisies.add(new Widgets.Choix(ids[k], cids != null && k < cids.length ? cids[k] : "",
+                    noms != null && k < noms.length ? noms[k] : ""));
+        }
+        try {
+            style = Widgets.Style.valueOf(b.getString(ETAT_STYLE, Widgets.Style.LUNAIRE.name()));
+        } catch (IllegalArgumentException e) {
+            style = Widgets.Style.LUNAIRE;
+        }
+        logos = b.getBoolean(ETAT_LOGOS, true);
     }
 
     private int titre() {

@@ -66,8 +66,11 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
 
 // Lazy-loaded: these pull in hls.js: keep it out of the initial bundle so the
 // channel grid loads fast; the player chunk loads on first play / multi-screen.
-const Player = lazy(() => import('./components/Player').then((m) => ({ default: m.Player })));
-const MultiView = lazy(() => import('./components/MultiView').then((m) => ({ default: m.MultiView })));
+// Opening either one fetches both: switching from one to the other never waits.
+const loadPlayer = () => import('./components/Player');
+const loadMulti = () => import('./components/MultiView');
+const Player = lazy(() => { void loadMulti().catch(() => {}); return loadPlayer().then((m) => ({ default: m.Player })); });
+const MultiView = lazy(() => { void loadPlayer().catch(() => {}); return loadMulti().then((m) => ({ default: m.MultiView })); });
 const AdminDashboard = lazy(() => import('./components/AdminDashboard').then((m) => ({ default: m.AdminDashboard })));
 const ChannelDetail = lazy(() => import('./components/ChannelDetail').then((m) => ({ default: m.ChannelDetail })));
 const ProgrammeTv = lazy(() => import('./components/ProgrammeTv').then((m) => ({ default: m.ProgrammeTv })));
@@ -81,13 +84,46 @@ import { usePlayer, type PlayOptions } from './store/playerStore';
 import { useUI } from './store/uiStore';
 import { usePrefs } from './store/prefsStore';
 import { applyTheme } from './store/settingsStore';
-import { initSpatialNav, bindNavigate, focusAutofocus } from './lib/spatialNav';
+import { initSpatialNav, bindNavigate, focusAutofocus, isGridEntry } from './lib/spatialNav';
 import { isTV } from './lib/device';
 import { applyLang, useT, t as tr } from './lib/i18n';
 
 // Sync the catalog filters <-> the URL query string so a filtered/searched view is
 // shareable and survives reload (e.g. /?q=foot&cat=sports&country=FR). Personal
 // toggles (favorites, hide-geo) stay out of the URL.
+type UrlFilter = 'q' | 'category' | 'country' | 'language' | 'sort' | 'onlineOnly' | 'foot';
+function filterQuery(f: Pick<Filters, UrlFilter>): string {
+  const next = new URLSearchParams();
+  if (f.q.trim()) next.set('q', f.q.trim());
+  if (f.category) next.set('cat', f.category);
+  if (f.country) next.set('country', f.country);
+  if (f.language) next.set('lang', f.language);
+  if (f.sort && f.sort !== 'smart') next.set('sort', f.sort);
+  if (f.onlineOnly) next.set('online', '1');
+  if (f.foot) next.set('foot', '1');
+  return next.toString();
+}
+const URL_KEYS = ['q', 'cat', 'country', 'lang', 'sort', 'online', 'foot'];
+function urlQuery(params: URLSearchParams): string {
+  const next = new URLSearchParams();
+  for (const k of URL_KEYS) {
+    const v = params.get(k);
+    if (v) next.set(k, v);
+  }
+  return filterQuery(filtersOf(next));
+}
+function filtersOf(params: URLSearchParams): Pick<Filters, UrlFilter> {
+  const sort = params.get('sort');
+  return {
+    q: params.get('q') || '',
+    category: params.get('cat') || '',
+    country: params.get('country') || '',
+    language: params.get('lang') || '',
+    sort: sort === 'name' || sort === 'latency' ? sort : 'smart',
+    onlineOnly: params.get('online') === '1',
+    foot: params.get('foot') === '1',
+  };
+}
 function useFilterUrlSync() {
   const [params, setParams] = useSearchParams();
   const filters = useCatalog((s) => s.filters);
@@ -109,19 +145,39 @@ function useFilterUrlSync() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Filters -> URL. Entering a filtered view from Home adds ONE history entry, so
+  // the system Back (phone, installed PWA, iOS swipe) returns Home instead of
+  // leaving the app (WEB-10); refining the view replaces that entry. Read from the
+  // store, not this render: on mount the hydration above has just set them.
   useEffect(() => {
     if (!hydrated.current) return;
-    const next = new URLSearchParams();
-    if (filters.q.trim()) next.set('q', filters.q.trim());
-    if (filters.category) next.set('cat', filters.category);
-    if (filters.country) next.set('country', filters.country);
-    if (filters.language) next.set('lang', filters.language);
-    if (filters.sort && filters.sort !== 'smart') next.set('sort', filters.sort);
-    if (filters.onlineOnly) next.set('online', '1');
-    if (filters.foot) next.set('foot', '1');
-    setParams(next, { replace: true });
+    const next = filterQuery(useCatalog.getState().filters);
+    const cur = urlQuery(new URLSearchParams(window.location.search));
+    if (next === cur) return;
+    const grid = isGridEntry();
+    const inLayer = (window.history.state as { nwLayer?: unknown } | null)?.nwLayer != null;
+    if (!next && grid && !inLayer) {
+      // Back to Home from a pushed view: pop it rather than stack a second Home.
+      window.history.back();
+      return;
+    }
+    const push = !cur && !!next && !inLayer;
+    setParams(new URLSearchParams(next), { replace: !push, state: push || grid ? { nwGrid: true } : undefined });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.q, filters.category, filters.country, filters.language, filters.sort, filters.onlineOnly, filters.foot]);
+
+  // URL -> filters, for Back / Forward between those entries (not on mount: the
+  // hydration above owns it).
+  const search = urlQuery(params);
+  const lastSearch = useRef(search);
+  useEffect(() => {
+    if (lastSearch.current === search) return;
+    lastSearch.current = search;
+    const state = useCatalog.getState();
+    if (filterQuery(state.filters) === search) return;
+    if (!search) state.resetFilters();
+    else state.setFilters(filtersOf(new URLSearchParams(search)));
+  }, [search]);
 }
 
 function Browse() {
@@ -377,11 +433,12 @@ function AppShell() {
         <Dock />
       </div>
 
-      {/* Global overlays (lazy: load hls.js only when first used) */}
-      <Suspense fallback={null}>
-        {current && <Player key={current.url} channel={current} />}
-        {multiOpen && <MultiView />}
-      </Suspense>
+      {/* Global overlays (lazy: load hls.js only when first used). One boundary
+          each: while one chunk loads, the other overlay is never kept mounted
+          hidden (a closed player playing on with sound, WEB-8). The player is not
+          keyed by channel: zapping keeps its sound and focus (it resets the video). */}
+      <Suspense fallback={null}>{current && <Player channel={current} />}</Suspense>
+      <Suspense fallback={null}>{multiOpen && <MultiView />}</Suspense>
       <Settings />
       <Login />
       <Pricing />

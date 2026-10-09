@@ -92,10 +92,13 @@ current in `canonicalId`.
 `co.soclose.neowatch.twa`, same signing key, so it installs over the old TWA and the verified
 app links keep working. It loads `https://neowatch.soclose.co`, appends ` NeoWatchTV/2.0` to the
 user agent, and carries three phone widgets that read only the public routes above. The
-remote's Back key does WebView history back (then leaves the app). The web app opens every
-overlay (player, mosaic, menus, dialogs) as a history entry, so Back closes the overlay first.
-A shell may also ask the page directly: `window.__nwBack()` runs the Back action and returns
-`true` when the page handled it, `false` when nothing is left (the shell may exit). Build, signing and publish steps: [android/README.md](android/README.md). It is
+web app opens every overlay (player, mosaic, menus, dialogs) as a history entry. On the
+remote's Back key the shell (2.1.1+) first leaves fullscreen video, then asks the page:
+`window.__nwBack()` runs the Back action and returns `true` when the page handled it (closed an
+overlay, went back a page, sent a deep link with no history to Home, or showed "Press Back
+again to exit" on Home) and `false` when nothing is left (a second Back within 2.6 s on Home):
+the shell exits. With no hook, or no answer within 300 ms, the shell does WebView history back
+(then leaves the app). Build, signing and publish steps: [android/README.md](android/README.md). It is
 published at `/app.apk` only with the owner's go-ahead (`bash scripts/deploy.sh --apk FILE`).
 
 ## 7. Pending external connectors (operator keys)

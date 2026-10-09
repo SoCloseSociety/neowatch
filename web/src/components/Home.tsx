@@ -6,14 +6,14 @@ import { fetchNowNext, type NowNext } from '@/lib/epg';
 import { categoryLabel } from '@/lib/format';
 import { fmtAge, fmtTime, hasKey, useI18n, useT } from '@/lib/i18n';
 import type { Channel, Filters, HomeData, HomeRail } from '@/types';
-import { useCatalog } from '@/store/catalogStore';
+import { useCatalog, RETRY_DELAYS_MS } from '@/store/catalogStore';
 import { useUI, toast } from '@/store/uiStore';
 import { usePlayer } from '@/store/playerStore';
 import { usePrefs } from '@/store/prefsStore';
 import { effectiveTheme, useSettings } from '@/store/settingsStore';
 import { Rail, ROW_MAX } from './Rail';
 import { countryLabel, languageLabel, monogram, qualityLabel, type PlayFn } from './ChannelCard';
-import { Button, CardSkeleton, EmptyState, LivePill, Meta } from './ui';
+import { AmbianceImg, Button, CardSkeleton, EmptyState, LivePill, Meta } from './ui';
 import { insideTvShell } from './Install';
 import { imgSrc } from '@/lib/img';
 import { isTV, prefersReducedMotion } from '@/lib/device';
@@ -36,10 +36,10 @@ const AMBIANCE: Record<string, string> = {
 function ambianceOf(ch: Featured | null): string | null {
   if (!ch) return null;
   const c0 = ch.categories?.[0];
-  if (c0 && AMBIANCE[c0]) return `/ambiance/${AMBIANCE[c0]}.webp`;
+  if (c0 && AMBIANCE[c0]) return AMBIANCE[c0];
   // The server's heroCategory counts only when the channel really carries it.
   const hc = ch.heroCategory;
-  if (hc && ch.categories?.includes(hc) && AMBIANCE[hc]) return `/ambiance/${AMBIANCE[hc]}.webp`;
+  if (hc && ch.categories?.includes(hc) && AMBIANCE[hc]) return AMBIANCE[hc];
   return null;
 }
 
@@ -155,6 +155,27 @@ export function Home({ onPlay }: { onPlay: PlayFn }) {
       alive = false;
     };
   }, [homeVersion, lang, reload]);
+
+  // A failed FIRST load retries on its own, with the grid's backoff, and at once
+  // when the network comes back (a TV booted before its Wi-Fi, WEB-6). A failed
+  // refresh keeps the rows shown (the staleness check below retries it).
+  const failures = useRef(0);
+  useEffect(() => {
+    if (!failed) {
+      failures.current = 0;
+      return;
+    }
+    if (data) return;
+    const delay = RETRY_DELAYS_MS[Math.min(failures.current, RETRY_DELAYS_MS.length - 1)];
+    failures.current += 1;
+    const retry = () => setReload((n) => n + 1);
+    const timer = setTimeout(retry, delay);
+    window.addEventListener('online', retry);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('online', retry);
+    };
+  }, [failed, data, reload]);
 
   // WEB-22: a TV left on Home refetches before its signed links expire, and
   // when it comes back to the foreground with an old payload.
@@ -280,7 +301,15 @@ export function Home({ onPlay }: { onPlay: PlayFn }) {
           icon={<CloudOff size={40} strokeWidth={1.5} />}
           title={t('home.error')}
           body={t('home.errorBody')}
-          action={{ label: t('empty.tryAgain'), onClick: () => setReload((n) => n + 1) }}
+          action={{
+            label: t('empty.tryAgain'),
+            onClick: () => {
+              setReload((n) => n + 1);
+              // The filters and the status need the meta too (it failed with the rows).
+              const c = useCatalog.getState();
+              if (!c.meta || c.metaError) c.loadMeta();
+            },
+          }}
         />
       ) : !data ? (
         <RowSkeletons />
@@ -427,12 +456,12 @@ function Hero({ hero, now, collapsed, onWatch, onSurprise }: { hero: Featured | 
       {/* Visual: the category artwork in the right 62 % ("window"), else the logo window */}
       <div aria-hidden="true" className="absolute inset-0 sm:left-[38%]">
         {amb ? (
-          <div key={amb} className="absolute inset-0 animate-fade-in bg-cover bg-center" style={{ backgroundImage: `url(${amb})` }} />
+          <AmbianceImg key={amb} name={amb} sizes="(min-width: 640px) 62vw, 100vw" className="absolute inset-0 animate-fade-in" />
         ) : hero ? (
           <div key={hero.url} className="absolute inset-0 flex animate-fade-in items-start justify-end p-4 transition-opacity duration-300 sm:items-center sm:justify-center sm:p-8" style={fade}>
             <div className="flex aspect-[520/320] w-[46%] max-w-[520px] items-center justify-center rounded-card bg-[var(--surface-carte)] shadow-[inset_0_0_0_1px_var(--line)] sm:w-[78%]">
               {hero.logo && !logoFailed ? (
-                <img src={imgSrc(hero.logo)} alt="" width={260} height={160} decoding="async" referrerPolicy="no-referrer" onError={() => setLogoFailed(true)} className="h-auto max-h-[56%] w-auto max-w-[64%] object-contain" />
+                <img src={imgSrc(hero.logo, 640)} alt="" width={260} height={160} decoding="async" referrerPolicy="no-referrer" onError={() => setLogoFailed(true)} className="h-auto max-h-[56%] w-auto max-w-[64%] object-contain" />
               ) : (
                 <span translate="no" className="font-mono text-titre font-semibold text-ink-2">{monogram(hero.name)}</span>
               )}

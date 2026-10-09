@@ -22,7 +22,6 @@ interface SettingsState {
   theme: ThemeName;
   density: Density;
   defaultMuted: boolean;
-  autoplay: boolean;
   reduceMotion: boolean;
   preferProxy: boolean; // force proxy for all playback (helps on locked networks)
   showOffline: boolean; // still render channels probed as offline
@@ -41,7 +40,6 @@ export const useSettings = create<SettingsState>()(
       theme: 'lunaire',
       density: 'comfortable',
       defaultMuted: true,
-      autoplay: true,
       // First run follows the OS preference; the user's choice is persisted after.
       reduceMotion: prefersReducedMotion(),
       preferProxy: false,
@@ -70,13 +68,13 @@ export const useSettings = create<SettingsState>()(
       merge: (persisted, current) => {
         const p = { ...((persisted as Record<string, unknown>) || {}) };
         delete p.accent;
+        delete p.autoplay; // a switch that never did anything (removed, QA-9)
         return { ...current, ...(p as Partial<SettingsState>), theme: normalizeTheme(p.theme ?? current.theme) };
       },
       partialize: (s): Persisted => ({
         theme: s.theme,
         density: s.density,
         defaultMuted: s.defaultMuted,
-        autoplay: s.autoplay,
         reduceMotion: s.reduceMotion,
         preferProxy: s.preferProxy,
         showOffline: s.showOffline,

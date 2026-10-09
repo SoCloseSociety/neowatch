@@ -3,6 +3,7 @@ import { clsx } from 'clsx';
 import type Hls from 'hls.js';
 import { RadioTower, Search, Play, Square, Volume2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { proxyExp } from '@/lib/fresh';
 import { useT } from '@/lib/i18n';
 import { AdBanner } from './AdBanner';
 import { countryLabel } from './ChannelCard';
@@ -31,6 +32,9 @@ const isHlsUrl = (u: string) => /\.m3u8(\?|$)/i.test(u) || /\/hls\//i.test(u);
 const START_TIMEOUT_MS = 12_000;
 /** Playing but no audio progress for this long: reconnect once. */
 const STALL_MS = 15_000;
+/** Relay links live 2 h (server signing.js): re-sign the list when one has less than this left. */
+const MIN_LINK_LIFE_MS = 10 * 60_000;
+const LIST_URL = '/radios?limit=200';
 
 // Internet radio (radio-browser.info directory). Stations play in a sticky bar:
 // HTTPS streams play direct, HTTP streams through the signed relay (mixed content),
@@ -58,7 +62,7 @@ export function Radios() {
   useEffect(() => {
     let alive = true;
     setState('loading');
-    api.get<{ items: Station[] }>('/radios?limit=200')
+    api.get<{ items: Station[] }>(LIST_URL)
       .then((r) => { if (alive) { setStations(r.items || []); setState((r.items || []).length ? 'ready' : 'error'); } })
       .catch(() => { if (alive) setState('error'); });
     return () => { alive = false; };
@@ -91,13 +95,42 @@ export function Radios() {
     }
   }, []);
 
+  // A page left open for hours holds expired relay links (2 h): fetch the list
+  // again (one request for every caller) and use that station's fresh copy (WEB-3).
+  const refreshing = useRef<Promise<Station[]> | null>(null);
+  const freshStation = useCallback(async (s: Station): Promise<Station> => {
+    const exp = proxyExp(s.proxyUrl);
+    if (exp !== null && exp - Date.now() > MIN_LINK_LIFE_MS) return s;
+    if (!refreshing.current) {
+      refreshing.current = api
+        .get<{ items: Station[] }>(LIST_URL)
+        .then((r) => {
+          const items = r.items || [];
+          if (items.length) setStations(items);
+          return items;
+        })
+        .catch(() => [] as Station[])
+        .finally(() => { refreshing.current = null; });
+    }
+    const items = await refreshing.current;
+    return items.find((x) => x.id === s.id) || s;
+  }, []);
+
   // Load one source into the <audio>: native for files and Safari HLS, hls.js otherwise.
-  const load = useCallback(async (s: Station, relay: boolean) => {
+  const load = useCallback(async (station: Station, relay: boolean) => {
     const a = audioRef.current;
     if (!a) return;
     const my = session.current;
     teardown();
-    const src = relay || /^http:\/\//i.test(s.url) ? s.proxyUrl : s.url;
+    const viaRelay = relay || /^http:\/\//i.test(station.url);
+    let s = station;
+    if (viaRelay) {
+      setPlayState('loading');
+      s = await freshStation(station);
+      if (session.current !== my) return;
+      currentRef.current = s;
+    }
+    const src = viaRelay ? s.proxyUrl : s.url;
     setPlayState('loading');
     lastProgress.current = Date.now();
     startTimer.current = setTimeout(() => {
@@ -123,7 +156,7 @@ export function Radios() {
       a.src = src;
     }
     a.play().catch(() => { /* the error/timeout path decides */ });
-  }, [teardown]);
+  }, [teardown, freshStation]);
 
   // Direct failed or never started -> once through the relay, then say so.
   const onFail = () => {
@@ -240,12 +273,12 @@ export function Radios() {
                       active ? 'border-line-strong bg-[var(--bg-3)]' : 'border-line'
                     )}
                   >
-                    <span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-field bg-mini" aria-hidden="true">
+                    <span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-field bg-[var(--plaque-mini)]" aria-hidden="true">
                       {s.favicon && !noIcon.has(s.id) ? (
-                        <img src={imgSrc(s.favicon)} alt="" width={48} height={48} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-contain"
+                        <img src={imgSrc(s.favicon, 96)} alt="" width={48} height={48} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-contain"
                           onError={() => setNoIcon((x) => new Set(x).add(s.id))} />
                       ) : (
-                        <RadioTower size={18} className="text-ink-3" />
+                        <RadioTower size={18} className="text-[color:var(--plaque-encre-3)]" />
                       )}
                     </span>
                     <span className="min-w-0 flex-1">

@@ -699,7 +699,8 @@ export function selectChannels({ category, country, language, q, foot, page = 1,
   // Multi-word search: every token must appear somewhere in the haystack (AND),
   // so "bbc news" matches a channel with both words, in any order.
   const needle = q ? norm(q) : '';
-  const qTokens = needle ? needle.split(/\s+/).filter(Boolean) : [];
+  // At most 8 distinct tokens: each one is matched against every item (twice when ranking).
+  const qTokens = needle ? [...new Set(needle.split(/\s+/).filter(Boolean))].slice(0, 8) : [];
   if (qTokens.length) {
     list = list.filter((it) => {
       const hay = it._search || norm(`${it.name} ${it.countryName || ''} ${it.categoryNames.join(' ')}`);

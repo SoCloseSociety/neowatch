@@ -2,6 +2,8 @@
 <resources>
     <string name="app_name" translatable="false">NEOWATCH</string>
     <string name="no_app_for_link">No app on this device can open that link.</string>
+    <string name="download_saved">File saved: %1$s</string>
+    <string name="download_failed">File not saved. Open NEOWATCH in a browser to download it.</string>
 
     <!-- Home-screen widgets (v2.1.0). Short sentences (12 words max), no jargon, no em dash. -->
     <string name="w_direct_nom">Live now</string>

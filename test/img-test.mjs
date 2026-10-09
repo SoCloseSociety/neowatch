@@ -114,6 +114,13 @@ const upstream = createServer((q, s) => {
 });
 upstream.on('connection', (sock) => sock.unref()); // a stalled /logo/slow must not hold the exit
 
+// A logo host that accepts every connection and never answers (the SRV-8 "dead host").
+let HANG_PORT = 0; // a free port, picked at listen
+let hangConns = 0;
+const hangSockets = new Set();
+const hangHost = createServer(() => { /* never answers */ });
+hangHost.on('connection', (sock) => { hangConns++; hangSockets.add(sock); sock.unref(); sock.on('close', () => hangSockets.delete(sock)); });
+
 const LOGOS = [
   'real.png', 'real3.png', 'takedown.png', 'html.png', 'html-label', 'octet.jpg', 'mislabelled', 'logo.svg', 'svg-as-png',
   'webp', 'avif', 'favicon.ico', 'polyglot.gif', 'big.png', 'big-len.png', 'redir-other', 'redir-meta', 'redir-same',
@@ -136,11 +143,13 @@ const ourHeaders = (r) => {
 
 (async () => {
   await new Promise((r) => upstream.listen(UP, '127.0.0.1', r));
+  await new Promise((r) => hangHost.listen(0, '127.0.0.1', r));
+  HANG_PORT = hangHost.address().port;
   let admin = null, srcId = null;
   try {
     // ── sniffer (unit) ──
     section('magic-byte sniffer (unit)');
-    const { sniffImage, imgurRendition } = await import(resolve(ROOT, 'server/src/img.js'));
+    const { sniffImage, imgurRendition, renditionFor } = await import(resolve(ROOT, 'server/src/img.js'));
     const cases = [
       [PNG, 'image/png'], [JPEG, 'image/jpeg'], [GIF, 'image/gif'], [WEBP, 'image/webp'], [AVIF, 'image/avif'], [ICO, 'image/x-icon'],
       [Buffer.from(HTML), null], [Buffer.from(SVG), null], [Buffer.from('%PDF-1.7\n'), null], [Buffer.from('BM6\0\0\0\0\0'), null],
@@ -157,6 +166,28 @@ const ourHeaders = (r) => {
     };
     const badRend = Object.entries(rend).filter(([u, want]) => imgurRendition(u) !== want).map(([u]) => u);
     check(`imgurRendition: ${Object.keys(rend).length} cases (only i.imgur.com/<id>.png|jpg|webp over https, never a gif, never another host)`, !badRend.length, badRend.join(', '));
+
+    // Size hint (?w=96|320|640): imgur m.webp (320 px) for small slots, l.webp (640 px) for
+    // the hero; Wikimedia thumbnails stepped DOWN to 120 / 330 px; never another host, never
+    // a bigger thumbnail, nothing without a hint. (imgur has no t.webp: it 302s to HTML.)
+    const WK = 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/01/100p-nl-tv-logo.png/';
+    const sized = [
+      ['https://i.imgur.com/FabFP5A.png', 96, 'https://i.imgur.com/FabFP5Am.webp'],
+      ['https://i.imgur.com/FabFP5A.png', 320, 'https://i.imgur.com/FabFP5Am.webp'],
+      ['https://i.imgur.com/FabFP5A.png', 640, 'https://i.imgur.com/FabFP5Al.webp'],
+      ['https://i.imgur.com/FabFP5A.png', 0, null],
+      ['https://i.imgur.com/FabFP5A.gif', 96, null],
+      [`${WK}960px-100p-nl-tv-logo.png`, 96, `${WK}120px-100p-nl-tv-logo.png`],
+      [`${WK}960px-100p-nl-tv-logo.png`, 320, `${WK}330px-100p-nl-tv-logo.png`],
+      [`${WK}960px-100p-nl-tv-logo.png`, 640, null],
+      [`${WK}250px-100p-nl-tv-logo.png`, 320, null],
+      [`${WK}120px-100p-nl-tv-logo.png`, 96, null],
+      ['https://upload.wikimedia.org.evil.example/wikipedia/commons/thumb/a/ab/x.png/960px-x.png', 96, null],
+      ['https://upload.wikimedia.org/wikipedia/commons/0/01/100p-nl-tv-logo.png', 96, null],
+      ['https://example.com/logo.png', 96, null],
+    ];
+    const badSized = sized.filter(([u, w, want]) => renditionFor(u, w) !== want).map(([u, w]) => `${u} w=${w} -> ${renditionFor(u, w)}`);
+    check(`renditionFor: ${sized.length} cases (imgur m/l by size, Wikimedia stepped down only, no other host, no hint = none)`, !badSized.length, badSized.join('; '));
 
     const cfg = await req('/api/config');
     check('server reachable', cfg.status === 200, `status=${cfg.status}`);
@@ -218,6 +249,18 @@ const ourHeaders = (r) => {
     check('If-None-Match -> 304', reval?.status === 304, `etag=${etag} status=${reval?.status}`);
     const burst = await Promise.all(Array.from({ length: 6 }, () => img(logo('inflight.png'))));
     check('6 concurrent first requests -> 6 x 200, ONE upstream fetch', burst.every((r) => r.status === 200) && hits['/logo/inflight.png'] === 1, `statuses=${burst.map((r) => r.status)} hits=${hits['/logo/inflight.png']}`);
+
+    section('size hint (?w=): one cached copy per size, an unknown w is ignored');
+    const hw0 = hits['/logo/real.png'] || 0;
+    const plain = await img(logo('real.png')); // cached plain copy: no upstream hit
+    const w96a = await req(`/api/img?u=${enc(logo('real.png'))}&w=96`);
+    const hw1 = hits['/logo/real.png'] || 0;
+    const w96b = await req(`/api/img?u=${enc(logo('real.png'))}&w=96`);
+    check('w=96 on a host with no rendition -> 200, the original bytes, our headers', w96a.status === 200 && w96a.buf.equals(PNG) && w96a.ct === 'image/png' && !ourHeaders(w96a).length, `${w96a.status} ${w96a.ct}`);
+    check('w=96 has its own cache entry (one upstream fetch, then cached)', plain.status === 200 && hw1 === hw0 + 1 && (hits['/logo/real.png'] || 0) === hw1 && w96b.status === 200, `hits +${hw1 - hw0}, then +${(hits['/logo/real.png'] || 0) - hw1}`);
+    const wOdd = await req(`/api/img?u=${enc(logo('real.png'))}&w=123`);
+    const wArr = await req(`/api/img?u=${enc(logo('real.png'))}&w=96&w=320`);
+    check('w=123 / w twice -> no hint: 200 from the plain cache entry, no upstream hit', wOdd.status === 200 && wArr.status === 200 && (hits['/logo/real.png'] || 0) === hw1, `${wOdd.status}/${wArr.status} hits +${(hits['/logo/real.png'] || 0) - hw1}`);
 
     section('content sniffing: the label is never trusted');
     const html = await img(logo('html.png'));
@@ -298,6 +341,49 @@ const ourHeaders = (r) => {
       check('a listed radio favicon is vended (200 or 502; never 404)', r.status === 200 || r.status === 502, `status=${r.status} ${st.favicon}`);
     }
 
+    section('one client on a hanging logo host cannot starve the others (fair queue + host breaker)');
+    {
+      // 280 logos on a host that never answers fill the 16 fetch slots + the 256-entry
+      // waiting room. Before the fix every other viewer's uncached logo then got a 503 and
+      // the dead host held a slot 10 s per logo (280 / 16 x 10 s = ~3 min).
+      const N = 280;
+      const hangLogo = (i) => `http://127.0.0.1:${HANG_PORT}/hang/${i}.png`;
+      const hm3u = '#EXTM3U\n' + Array.from({ length: N }, (_, i) => `#EXTINF:-1 tvg-logo="${hangLogo(i)}",IMG Hang ${RUN} ${i}\n${streamOf(`hang${i}`)}\n`).join('');
+      const hadd = await req('/api/admin/sources', { method: 'POST', token: admin, body: { name: 'img-hang', text: hm3u } });
+      const hangId = (hadd.data?.sources || []).find((s) => s.name === 'img-hang')?.id || null;
+      for (let i = 0; hangId && i < 25; i++) {
+        const l = await req(`/api/catalog/channels?category=custom&q=${enc(`IMG Hang ${RUN}`)}&limit=1`, { token: admin });
+        if ((l.data?.items || []).length) break;
+        await sleep(300);
+      }
+      const v4 = new URL(BASE); v4.hostname = '127.0.0.1';
+      const v6 = new URL(BASE); v6.hostname = '[::1]';
+      const at = (base, u, extra = '') => fetch(`${base.origin}/api/img?u=${enc(u)}${extra}`, { signal: AbortSignal.timeout(60000) })
+        .then((r) => r.arrayBuffer().then(() => r.status), () => 0);
+      const v6ok = await at(v6, logo('real.png'));
+      if (!hangId) check('the hang source is imported', false, `status=${hadd.status}`);
+      else if (!v6ok) skipped('fair queue', 'the server is not reachable on [::1] (a second client address is needed)');
+      else {
+        try {
+          const t0 = Date.now();
+          const flood = Promise.all(Array.from({ length: N }, (_, i) => at(v4, hangLogo(i)).then((st) => ({ st, ms: Date.now() - t0 }))));
+          await sleep(400);
+          const others = await Promise.all([
+            at(v6, logo('real3.png')), at(v6, logo('real.png'), '&w=320'), at(v6, logo('real.png'), '&w=640'),
+          ]);
+          check('another client\'s uncached logos are served (200), not 503', others.every((st) => st === 200), `statuses=${others}`);
+          const res = await flood;
+          const took = Math.max(...res.map((r) => r.ms));
+          check(`the hanging host's 280 logos all end fast once it trips (${Math.round(took / 1000)} s, not ~3 min)`, res.every((r) => r.st !== 0) && took < 30000, `took=${took} ms unanswered=${res.filter((r) => r.st === 0).length}`);
+          check('the hanging host was contacted ~once per slot, not once per logo', hangConns <= 40, `connections=${hangConns}`);
+          check('... and its failures are 502/503/504, never 200', res.every((r) => [502, 503, 504].includes(r.st)), [...new Set(res.map((r) => r.st))].join(','));
+        } finally {
+          await req(`/api/admin/sources/${hangId}`, { method: 'DELETE', token: admin });
+        }
+      }
+      if (hangId && !v6ok) await req(`/api/admin/sources/${hangId}`, { method: 'DELETE', token: admin });
+    }
+
     section('source removed -> its logos 404');
     if (srcId) {
       await req(`/api/admin/sources/${srcId}`, { method: 'DELETE', token: admin });
@@ -317,6 +403,8 @@ const ourHeaders = (r) => {
   } finally {
     if (srcId && admin) await req(`/api/admin/sources/${srcId}`, { method: 'DELETE', token: admin });
     upstream.close();
+    for (const sock of hangSockets) sock.destroy();
+    hangHost.close();
     console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
     if (fails.length) console.log('FAILED:\n  ' + fails.join('\n  '));
     process.exit(fail ? 1 : 0);

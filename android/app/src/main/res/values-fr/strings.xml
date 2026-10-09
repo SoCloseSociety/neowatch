@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="no_app_for_link">Aucune app de cet appareil ne peut ouvrir ce lien.</string>
+    <string name="download_saved">Fichier enregistré : %1$s</string>
+    <string name="download_failed">Fichier non enregistré. Ouvrez NEOWATCH dans un navigateur pour le télécharger.</string>
 
     <string name="w_direct_nom">En direct</string>
     <string name="w_direct_desc">Les chaînes à l\'antenne maintenant. Touchez-en une pour regarder.</string>

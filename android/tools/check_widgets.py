@@ -8,7 +8,9 @@ RemoteViews only inflates a CLOSED list of views. A bare <View> (a divider, a ve
 
 NEOWATCH additions: the strings exist in en / fr / ru with the same format arguments, widget
 sentences stay at 12 words or less, no em dash anywhere under android/, and the widget code
-never touches a token, a signed proxy link or a forbidden route.
+never touches a token, a signed proxy link or a forbidden route. Shell guards (review of 09/10/2026):
+deep links are checked on the raw authority and rebuilt, the page's own blob: downloads are
+saved, and the soft keyboard is followed on phones.
 
 Usage (from the repo root):  python3 -I android/tools/check_widgets.py
 Exit code 0 = every check passed.
@@ -173,6 +175,43 @@ class TestWidgets(unittest.TestCase):
         for f in widget_java():
             routes |= set(re.findall(r'"(/api/[a-z/]+)', f.read_text(encoding="utf-8")))
         self.assertEqual(routes, {"/api/catalog/home", "/api/catalog/channel/", "/api/catalog/channels", "/api/epg/now"})
+
+
+class TestShell(unittest.TestCase):
+    """LauncherActivity guards that a refactor could silently drop (no device needed)."""
+
+    @classmethod
+    def setUpClass(cls):
+        texte = (JAVA / "co" / "soclose" / "neowatch" / "twa" / "LauncherActivity.java").read_text(encoding="utf-8")
+        cls.code = re.sub(r"//.*", "", re.sub(r"/\*.*?\*/", "", texte, flags=re.S))
+
+    def test_deep_links_check_the_raw_authority_and_load_the_rebuilt_url(self):
+        # An unpatched android.net.Uri (API 23-26) gives getHost() = our host for
+        # "https://evil.example\\@neowatch.soclose.co/": never decide on getHost().
+        self.assertNotIn(".getHost()", self.code)
+        self.assertIn("HOST.equalsIgnoreCase(uri.getEncodedAuthority())", self.code)
+        self.assertRegex(self.code, r"static String urlFromIntent\(Intent intent\) \{[^}]*return ownUrl\(intent\.getData\(\), true\);")
+        self.assertIn("ownUrl(Uri.parse(saved), false)", self.code)
+
+    def test_the_pages_own_blob_downloads_are_saved_not_dropped(self):
+        # openExternally refuses blob: (no other app can read it): the listener must save it first.
+        m = re.search(r"setDownloadListener\((.*?)\);\n", self.code, re.S)
+        self.assertIsNotNone(m)
+        self.assertIn("OWN_BLOB.matcher(url).matches()", m.group(1))
+        self.assertIn("saveBlob(", m.group(1))
+        self.assertIn("R.string.download_failed", self.code)
+        self.assertNotIn("addJavascriptInterface", self.code)
+
+    def test_phones_follow_the_soft_keyboard(self):
+        # Under the fullscreen theme adjustResize is ignored (API 23-29).
+        self.assertIn("if (!isTv) followKeyboard();", self.code)
+
+
+    def test_widget_options_keep_unsaved_choices_on_recreation(self):
+        # No configChanges on WidgetConfigActivity: a rotation recreates it before Done.
+        texte = (JAVA / "co" / "soclose" / "neowatch" / "twa" / "WidgetConfigActivity.java").read_text(encoding="utf-8")
+        self.assertIn("protected void onSaveInstanceState(Bundle out)", texte)
+        self.assertRegex(texte, r"if \(b != null && b\.getStringArray\(ETAT_IDS\) != null\) \{[^}]*restaurer\(b\);")
 
 
 if __name__ == "__main__":

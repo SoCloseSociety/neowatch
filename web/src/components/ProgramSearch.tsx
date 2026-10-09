@@ -64,13 +64,14 @@ export function ProgramSearch() {
             onClick={() => open(r)}
             className="lift flex w-[var(--carte-l)] shrink-0 snap-start items-center gap-3 rounded-card bg-[var(--surface-carte)] p-3 text-left shadow-[inset_0_0_0_1px_var(--line)]"
           >
-            <span className="flex h-12 w-16 shrink-0 items-center justify-center rounded-field bg-[var(--bg-3)]">
+            <span className="flex h-12 w-16 shrink-0 items-center justify-center rounded-field bg-[var(--plaque)]">
               <LogoImg
                 src={r.channel.logo}
+                w={96}
                 width={56}
                 height={40}
                 loading="lazy"
-                fallback={<span aria-hidden="true" translate="no" className="font-mono text-sous font-semibold text-ink-2">{monogram(r.channel.name)}</span>}
+                fallback={<span aria-hidden="true" translate="no" className="font-mono text-sous font-semibold text-[color:var(--plaque-encre)]">{monogram(r.channel.name)}</span>}
                 className="h-auto max-h-[70%] w-auto max-w-[80%] object-contain"
               />
             </span>

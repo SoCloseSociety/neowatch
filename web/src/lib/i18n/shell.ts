@@ -25,11 +25,14 @@ export const shell = {
   'shell.qualityLevel': { en: 'Level {n}', fr: 'Niveau {n}', ru: 'Уровень {n}' },
   'shell.trackN': { en: 'Track {n}', fr: 'Piste {n}', ru: 'Дорожка {n}' },
   // Multi-view
-  'shell.tilesOf': { en: '{n} of {max} screens', fr: '{n} écrans sur {max}', ru: '{n} из {max} экранов' },
+  // Plural base: t.n('shell.tilesOf', n, { max })
+  'shell.tilesOf.one': { en: '{n} of {max} screens', fr: '{n} écran sur {max}', ru: '{n} из {max} экранов' },
+  'shell.tilesOf.other': { en: '{n} of {max} screens', fr: '{n} écrans sur {max}', ru: '{n} из {max} экранов' },
   'shell.multiHint': { en: 'Pick a screen to hear it.', fr: 'Choisissez un écran pour l’écouter.', ru: 'Выберите экран, чтобы его слушать.' },
   'shell.multiEmptyHow': { en: 'Add channels with the + button in the player.', fr: 'Ajoutez des chaînes avec le bouton + du lecteur.', ru: 'Добавляйте каналы кнопкой + в плеере.' },
   'shell.tileLabel': { en: '{name}: play its sound', fr: '{name} : écouter le son', ru: '{name}: включить звук' },
   'shell.soundOn': { en: 'Sound', fr: 'Son', ru: 'Звук' },
+  'shell.soundBlocked': { en: 'Tap for sound', fr: 'Touchez pour le son', ru: 'Нажмите для звука' },
   'shell.multiCleared': { en: 'Multi-view cleared.', fr: 'Multi-écran vidé.', ru: 'Мультиэкран очищен.' },
   'shell.tileRemoved': { en: '{name} removed.', fr: '{name} retirée.', ru: '{name}: убрано.' },
   // Install (spec 4.6)
@@ -43,6 +46,7 @@ export const shell = {
   'shell.getTvApp': { en: 'Get the TV app', fr: 'Obtenir l’app TV', ru: 'Скачать ТВ-приложение' },
   // Core keys rewritten to the tone rules (folded back by the integrator)
   'pill.unavailable': { en: 'UNAVAILABLE', fr: 'INDISPONIBLE', ru: 'НЕДОСТУПЕН' },
+  'pill.film': { en: 'MOVIE', fr: 'FILM', ru: 'ФИЛЬМ' },
   'ads.consentBody': { en: 'Free access is paid for by ads. They use cookies.', fr: 'Les pubs financent l’accès gratuit. Elles utilisent des cookies.', ru: 'Бесплатный доступ оплачивает реклама. Она использует cookie.' },
   'ads.accept': { en: 'Allow ads', fr: 'Accepter les pubs', ru: 'Разрешить рекламу' },
   'ads.decline': { en: 'No thanks', fr: 'Non merci', ru: 'Нет, спасибо' },

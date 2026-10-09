@@ -111,7 +111,6 @@ export function Settings() {
         <Group label={t('set.playback')} last>
           <div className="space-y-1">
             <Switch label={t('pages.settings.muted')} checked={s.defaultMuted} onChange={(v) => s.set({ defaultMuted: v })} />
-            <Switch label={t('pages.settings.autoplay')} checked={s.autoplay} onChange={(v) => s.set({ autoplay: v })} />
             <Switch label={t('pages.settings.relay')} hint={t('pages.settings.relayHint')} checked={s.preferProxy} onChange={(v) => s.set({ preferProxy: v })} />
             <Switch label={t('pages.settings.offAir')} checked={s.showOffline} onChange={(v) => s.set({ showOffline: v })} />
             <Switch label={t('pages.settings.motion')} checked={s.reduceMotion} onChange={(v) => s.set({ reduceMotion: v })} />

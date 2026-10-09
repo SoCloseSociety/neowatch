@@ -60,6 +60,30 @@ function focusedKey(): string | null {
 
 const playable = (c: Channel) => !!c.url && !c.locked;
 
+// A guide row is a short projection (no stream url): it joins a zapping list as
+// a stub, resolved through GET /catalog/channel/:id when zapping reaches it.
+const STUB = 'nw-guide:';
+/** A guide row not resolved yet (no stream: nothing to favorite or tile). */
+export const isStub = (c: Channel) => c.url.startsWith(STUB);
+/** Zapping-list entry for a guide row (id + channelId), resolved when it plays. */
+export function guideStub(row: { id: string; name: string; logo: string | null; channelId: string }): Channel {
+  return {
+    id: row.id, channelId: row.channelId || null, name: row.name, url: `${STUB}${row.id}`, kind: 'hls',
+    quality: null, label: null, userAgent: null, referrer: null, logo: row.logo || undefined,
+    categories: [], categoryNames: [], country: null, countryName: null, flag: null,
+    languages: [], languageNames: [], website: null, nsfw: false, proxyUrl: null, alternates: [],
+  };
+}
+async function resolveStub(c: Channel): Promise<Channel | null> {
+  try {
+    const q = c.channelId ? `?channelId=${encodeURIComponent(c.channelId)}` : '';
+    const full = await api.get<Channel>(`/catalog/channel/${encodeURIComponent(c.id)}${q}`);
+    return full && full.url && !full.locked ? full : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface PlayOptions {
   /** The list the channel was picked from (rail, grid, search), for next / previous. */
   queue?: Channel[];
@@ -124,6 +148,28 @@ export const usePlayer = create<PlayerState>((set, get) => {
   const show = (ch: Channel) => {
     const seq = ++playSeq;
     if (typeof window !== 'undefined') window.__nwLastPlayedKey = ch.url;
+    if (isStub(ch)) {
+      // A guide row reached by zapping: the overlay shows its name at once, the
+      // video mounts on the resolved channel, which takes the stub's place in
+      // the list. Unresolvable (gone, Premium): skip it, same direction.
+      set({ current: ch, currentReady: false, lastUrl: ch.url });
+      void resolveStub(ch).then((full) => {
+        if (seq !== playSeq || !get().current) return;
+        if (!full) {
+          const queue = get().queue.filter((c) => c.url !== ch.url);
+          const i = get().queue.findIndex((c) => c.url === ch.url);
+          set({ queue });
+          const nextCh = queue.length ? queue[Math.min(Math.max(i, 0), queue.length - 1)] : null;
+          if (nextCh) show(nextCh);
+          else get().close();
+          return;
+        }
+        set({ queue: get().queue.map((c) => (c.url === ch.url ? full : c)) });
+        useCatalog.getState().addRecent(full);
+        show(full);
+      });
+      return;
+    }
     if (!needsFresh(ch)) {
       set({ current: ch, currentReady: true, lastUrl: ch.url });
       return;
@@ -149,7 +195,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     const n = queue.length;
     const nextCh = queue[(((i < 0 ? 0 : i) + dir) % n + n) % n];
     if (!nextCh || nextCh.url === current.url) return;
-    useCatalog.getState().addRecent(nextCh);
+    if (!isStub(nextCh)) useCatalog.getState().addRecent(nextCh);
     show(nextCh);
   };
 
@@ -263,7 +309,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (!Array.isArray(serverMulti) || !serverMulti.length) return;
       const multi = serverMulti.filter(isChannel).slice(0, MAX_TILES);
       if (!multi.length) return;
-      const activeAudio = multi[0]?.url ?? null;
+      // The tile picked for sound on this device stays, when it is still a tile (QA-12).
+      const kept = get().activeAudio;
+      const activeAudio = kept && multi.some((c) => c.url === kept) ? kept : multi[0]?.url ?? null;
       saveMulti(multi, activeAudio);
       set({ multi, activeAudio });
       if (get().multiOpen) refreshMulti();

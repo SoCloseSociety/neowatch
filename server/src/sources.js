@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { config } from './config.js';
-import { stableId, classifyKind } from './util.js';
+import { stableId, classifyKind, readJsonArray } from './util.js';
 import { setCustomItems } from './catalog.js';
 import { safeFetch } from './netguard.js';
 
@@ -12,6 +12,9 @@ const REFRESH_MS = 6 * 60 * 60 * 1000;      // re-fetch URL playlists every 6h
 const RETRY_MS = 15 * 60 * 1000;            // a failed source is retried sooner
 const NAME_MAX = 80;
 const URL_MAX = 2048;
+// Whole fetch (headers + body): the agent's bodyTimeout only bounds the silence between
+// chunks, so a provider dripping a byte every 20 s held the rebuild queue forever.
+const FETCH_DEADLINE_MS = 60_000;
 const NSFW_RE = /\b(xxx|porn|adult|18\+|sex|erotic|hot ?cam|brazzers)\b/i;
 
 // User-supplied M3U / M3U8 playlists (e.g. the user's own IPTV provider).
@@ -21,6 +24,7 @@ const NSFW_RE = /\b(xxx|porn|adult|18\+|sex|erotic|hot ?cam|brazzers)\b/i;
 const SOURCES_FILE = join(config.dataDir, 'sources.json');
 let sources = [];   // [{ id, name, url, addedAt, count, lastError, lastFetched }]
 let loaded = false;
+let storeBroken = false; // sources.json unreadable/corrupt at boot: never save over it
 // Last good parse per source id: a provider blip (timeout, 5xx, truncated body) keeps
 // the channels we already had instead of removing them until the next refresh.
 const lastGood = new Map(); // srcId -> items[]
@@ -31,6 +35,7 @@ let retryTimer = null;
 // failed write must not skip every later save).
 let writeChain = Promise.resolve();
 function save() {
+  if (storeBroken) return Promise.reject(new Error(`${SOURCES_FILE} was unreadable at boot; not overwriting it (repair it and restart)`));
   const p = writeChain.then(async () => {
     await mkdir(config.dataDir, { recursive: true }).catch(() => {});
     const tmp = `${SOURCES_FILE}.${randomUUID()}.tmp`;
@@ -158,12 +163,26 @@ export function parseM3U(text, sourceName) {
 }
 
 async function fetchSource(src) {
+  // One deadline for headers + body (the signal also aborts reader.read()).
+  const signal = AbortSignal.timeout(FETCH_DEADLINE_MS);
+  try {
+    return await fetchSourceBody(src, signal);
+  } catch (e) {
+    if (signal.aborted) throw new Error(`timed out after ${FETCH_DEADLINE_MS / 1000} s`);
+    throw e;
+  }
+}
+
+async function fetchSourceBody(src, signal) {
   // safeFetch re-validates every redirect hop (SSRF); allowPrivate for LAN providers.
-  const res = await safeFetch(src.url, { headers: { 'User-Agent': 'NEOWATCH/1.0' } }, { allowPrivate: config.allowPrivateSources });
+  const res = await safeFetch(src.url, { headers: { 'User-Agent': 'NEOWATCH/1.0' }, signal }, { allowPrivate: config.allowPrivateSources });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const len = Number(res.headers.get('content-length') || 0);
-  if (len > MAX_PLAYLIST_BYTES) throw new Error('playlist too large');
+  if (len > MAX_PLAYLIST_BYTES) {
+    res.body?.cancel().catch(() => {});
+    throw new Error('playlist too large');
+  }
 
   // Stream with an incremental byte cap (chunked responses bypass content-length).
   const reader = res.body?.getReader();
@@ -212,7 +231,15 @@ async function doRebuild(force) {
     lastGood.set(src.id, items);
     src.count = items.length;
   }
-  // Merge from the CURRENT list: a source deleted while we were fetching must not come back.
+  const n = mergeCurrent();
+  if (failed) scheduleRetry();
+  if (!storeBroken) await save(); // a broken store refreshes in memory only
+  return n;
+}
+
+// Merge from the CURRENT list into the catalog: a source deleted while a fetch ran must
+// not come back. Synchronous, so an add or a delete takes effect at once.
+function mergeCurrent() {
   const live = new Set(sources.map((s) => s.id));
   for (const id of lastGood.keys()) if (!live.has(id)) lastGood.delete(id);
   const all = [];
@@ -225,8 +252,6 @@ async function doRebuild(force) {
     }
   }
   setCustomItems(all);
-  if (failed) scheduleRetry();
-  await save();
   return all.length;
 }
 
@@ -258,11 +283,11 @@ function ensureRefreshTimer() {
 
 export async function initSources() {
   if (!loaded) {
-    try {
-      sources = JSON.parse(await readFile(SOURCES_FILE, 'utf8'));
-    } catch {
-      sources = [];
-    }
+    // Only a missing file is "no sources"; a corrupt one is kept as is (never saved over).
+    const { data } = await readJsonArray(SOURCES_FILE, 'sources');
+    sources = data || [];
+    storeBroken = !data;
+    if (storeBroken) console.error(`  [sources] changes will NOT be saved (the file is kept as is) until it is repaired and the server restarted.\n`);
     loaded = true;
   }
   if (sources.length) {
@@ -289,9 +314,15 @@ sourcesPublicRouter.get('/sources', (_req, res) => res.json({ sources: sources.m
 
 export const sourcesAdminRouter = Router();
 
+// A broken sources.json (kept as is at boot) refuses every change up front: merging into
+// memory and then failing the save listed a channel that vanished at the next restart.
+const storeWritable = (_req, res, next) => (storeBroken
+  ? res.status(503).json({ error: 'sources.json is unreadable: repair it and restart the server' })
+  : next());
+
 sourcesAdminRouter.get('/sources', (_req, res) => res.json({ sources: sources.map(adminSrc) }));
 
-sourcesAdminRouter.post('/sources', wrap(async (req, res) => {
+sourcesAdminRouter.post('/sources', storeWritable, wrap(async (req, res) => {
   const { name, url, text } = req.body || {};
   if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name required' });
   const label = name.trim().slice(0, NAME_MAX);
@@ -309,6 +340,7 @@ sourcesAdminRouter.post('/sources', wrap(async (req, res) => {
       // Validate before saving; the parsed result seeds the rebuild (no second download).
       const items = await fetchSource(src);
       src.lastFetched = Date.now();
+      src.count = items.length; // only doRebuild set it before: the panel showed 0 until a refresh
       lastGood.set(src.id, items);
       sources.push(src);
     } else {
@@ -317,17 +349,21 @@ sourcesAdminRouter.post('/sources', wrap(async (req, res) => {
   } catch (e) {
     return res.status(400).json({ error: `could not import: ${String(e?.message || e)}` });
   }
-  await rebuildCustom();
+  // Already parsed: merge + save now, without queueing behind a refresh still downloading
+  // (a running rebuild merges the current list when it ends).
+  mergeCurrent();
+  await save();
   ensureRefreshTimer();
   res.json({ sources: sources.map(adminSrc) });
 }));
 
-sourcesAdminRouter.delete('/sources/:id', wrap(async (req, res) => {
+sourcesAdminRouter.delete('/sources/:id', storeWritable, wrap(async (req, res) => {
   const before = sources.length;
   sources = sources.filter((s) => s.id !== req.params.id);
   if (sources.length === before) return res.status(404).json({ error: 'not found' });
   lastGood.delete(req.params.id);
-  await rebuildCustom();
+  mergeCurrent(); // the channels go at once, not after a refresh still in flight
+  await save();
   res.json({ sources: sources.map(adminSrc) });
 }));
 

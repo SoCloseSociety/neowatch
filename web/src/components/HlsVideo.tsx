@@ -205,8 +205,10 @@ export function HlsVideo({ channel, muted, controls = true, className, lowRes = 
     // and escalate (proxy -> alternate feed -> error) instead of spinning forever.
     const DEAD_AIR_MS = 20000;
 
-    // Refresh the signed links once per run (in the background; awaited only by a
-    // proxy load). freshChannel never throws and returns the channel unchanged on failure.
+    // Refresh the signed links when they are stale (in the background; awaited only
+    // by a proxy load). One refresh in flight at a time, never a settled memo: links
+    // re-signed 2 h ago are stale again (WEB-7). freshChannel never throws and
+    // returns the channel unchanged on failure.
     let freshP: Promise<void> | null = null;
     const adopt = (next: Channel) => {
       if (destroyed || next === ch) return;
@@ -216,8 +218,13 @@ export function HlsVideo({ channel, muted, controls = true, className, lowRes = 
     };
     const ensureFresh = (force = false): Promise<void> => {
       if (force) return freshChannel(ch, { force: true }).then(adopt);
-      if (!freshP) freshP = needsFresh(ch) ? freshChannel(ch).then(adopt) : Promise.resolve();
-      return freshP;
+      if (freshP) return freshP;
+      if (!needsFresh(ch)) return Promise.resolve();
+      const p = freshChannel(ch).then(adopt).finally(() => {
+        if (freshP === p) freshP = null;
+      });
+      freshP = p;
+      return p;
     };
     if (needsFresh(ch)) void ensureFresh();
 
@@ -507,7 +514,14 @@ export function HlsVideo({ channel, muted, controls = true, className, lowRes = 
       if (!playingSince) return;
       const ranFor = Date.now() - playingSince;
       if (mode === 'direct' && ranFor > 5000) directRanLong = true;
-      if (ranFor > 30000) sameModeRetried = false; // a long healthy run earns a new in-place retry
+      if (ranFor > 30000) {
+        // A long healthy run earns a new in-place retry, a new relay refresh on 403
+        // and new relay retries: a TV left on a proxied channel outlives many link
+        // lifetimes (WEB-7).
+        sameModeRetried = false;
+        refreshed403 = false;
+        proxyRetries = 0;
+      }
     };
     // PLAY-6: time spent paused or seeking is not dead air.
     const onResetClock = () => {

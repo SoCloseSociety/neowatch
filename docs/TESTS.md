@@ -10,7 +10,7 @@ are listed at the end.
 | `npm run typecheck` | web TypeScript | 10 s |
 | `npm run build` | typecheck + production build (`web/dist`) | 20 s |
 | `npm test` | every server suite below, on throwaway servers | 2 to 3 min |
-| `node test/run.mjs contract proxy` | a subset of suites (names: `contract integration proxy img account catalog session`) | |
+| `node test/run.mjs contract proxy` | a subset of suites (names: `contract integration proxy img account catalog hardening session`) | |
 | `node test/verify-design.mjs --keys` | every `t('key')` used in `web/src` exists in EN, FR and RU (static) | 1 s |
 | `node test/verify-design.mjs <port> --pages ... --formats ... --measure --out DIR` | design rules in a real Chrome (12 px floor, one primary, contrast, focus ring, jargon, mixed languages...), one screenshot per page | 1 to 5 min |
 | `npm run test:e2e` | Playwright smoke: home, search, channel page, play, guide, filter URL, language (`BASE=` the server; default: the live site, GET only) | 1 min |
@@ -41,10 +41,11 @@ with Sentinel House `charte.css`) is local only: that file is not in this repo.
 | contract | `test/contract-test.mjs` | the FROZEN API (NEO_CONNECTOR.md): health, meta, channels?q, channel/:id fields + `canonicalId` + `?channelId=`, `/chaine/<id>` (+ `?play=1`), epg/now + epg/day shapes with a pasted XMLTV, unsigned proxy 403 | 34 |
 | integration | `test/integration-test.mjs` | config, catalog, auth and roles, admin gating, billing, signed proxy URLs, preferences (Premium feature), password change, M3U sources, guide, health check, home rails, language, sort and search, pagination, channel page, robustness | 66 |
 | proxy | `test/proxy-test.mjs` | lot S1: SSRF ranges, bounded reads, signing key, signature scope (ua/ref/root/lan), header allowlist + forced content type, range, playlist sniffing/rewrite, manifest caps + micro-cache, mid-stream failure, LAN custom sources, health probes, takedown 410 at serve time, radio links | 70 |
-| img | `test/img-test.mjs` | logo relay `/api/img`: only vended URLs (catalog logos, radio favicons; 404 otherwise, also after a takedown or a source removal), magic-byte sniffing (HTML as PNG, lying labels, polyglot), SVG refused (415), 1 MB cap (chunked + announced), redirects re-checked (other LAN host, cloud metadata), 10 s timeout, our headers only (no upstream header, no renewed token), LRU + 304 + one fetch per URL, negative cache, 204 for an `<img>` (no console error), imgur 640 px rendition, per-IP rate limit | 49 |
+| img | `test/img-test.mjs` | logo relay `/api/img`: only vended URLs (catalog logos, radio favicons; 404 otherwise, also after a takedown or a source removal), magic-byte sniffing (HTML as PNG, lying labels, polyglot), SVG refused (415), 1 MB cap (chunked + announced), redirects re-checked (other LAN host, cloud metadata), 10 s timeout, our headers only (no upstream header, no renewed token), LRU + 304 + one fetch per URL, negative cache, 204 for an `<img>` (no console error), imgur 640 px rendition, per-IP rate limit | 53 |
 | account | `test/account-test.mjs` (`S3_MODE=dev`) | lot S3: typed and capped inputs, roaming favorites/mosaic, prefs no-store, GDPR export, pairing caps, sources and guide projections, keep-last-good, XMLTV parser, films ids, save-chain recovery, plan copy, mock billing grant/cancel/resume, write throttles | 83 |
 | catalog | `test/catalog-test.mjs` (`MODE=live`) | lot S2: JSON 404, no stacks, bounded paging, health shape and privacy, document headers, `/assets` 404, localized rails, spotlights online only, id resolution (exact, alternate, `?channelId=`), blocklist on alternates, proxy not compressed, failed save -> 500 | 45 |
-| session | `test/session-test.mjs` | sliding sessions: renewal, expiry, revocation (`tokenVersion`), demoted admin, password races (409), TV pairing, no-store, no 304 replay, HS256 pinned, no token on `/api/proxy`, boot warnings, no token in the server log | 83 |
+| hardening | `test/hardening-test.mjs` | QA round 2: corrupt stores never saved over, a search that does not block the event loop, EPG caps that keep what airs now, a hung provider that does not stall source changes, races on the admin user store, long-lived caching of hashed assets | 34 |
+| session | `test/session-test.mjs` | sliding sessions: renewal, expiry, revocation (`tokenVersion`), demoted admin, password races (409), TV pairing, no-store, no 304 replay, HS256 pinned, no token on `/api/proxy`, boot warnings, no token in the server log | 88 |
 
 The catalog and account suites have other modes for one-off runs (each file's header explains
 the server to start): `MODE=fake|stale|empty` (crafted iptv-org upstream, outage, no cache) and
@@ -73,7 +74,9 @@ the proxy section is skipped (never counted as a failure).
   closes the top overlay then goes back, focus returns to the card that started the player.
 - Phone: the dock, install to the home screen, the PWA opens offline on the app shell.
 - QR sign-in: the TV shows a code, the phone approves, the TV is signed in.
-- Android shell and widgets: the checklists in `android/README.md` (owner, real devices).
+- Android shell and widgets: the checklists in `android/README.md` (owner, real devices). No
+  device needed for `python3 -I android/tools/check_widgets.py` (widget layouts and strings, plus
+  the shell guards: deep-link authority check, blob downloads saved, keyboard followed on phones).
 - Stripe with real keys (test mode first): checkout, renewal, cancel at period end, deletion.
 - AdSense with a real publisher id: the consent prompt, then an ad for a free user only.
 - `docker compose up --build` with a `.env` holding `JWT_SECRET`: the app on `PORT`, data kept

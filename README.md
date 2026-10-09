@@ -149,7 +149,7 @@ npm run test:e2e                      # Playwright smoke (BASE=http://localhost:
 node test/verify-design.mjs <port> --measure   # design rules measured in a real Chrome
 ```
 
-`npm test` (`test/run.mjs`) starts one throwaway server per suite (free port, temp `DATA_DIR`, shared temp `CACHE_DIR` seeded from `server/.cache`), never touches your data, and runs: the frozen API contract, integration, proxy, account and billing, catalog, and sliding sessions. With no cache and iptv-org unreachable it skips with a clear message. Details: [docs/TESTS.md](docs/TESTS.md). CI (`.github/workflows/ci.yml`) runs typecheck, build, the i18n key check, `npm test` and `npm audit --omit=dev --audit-level=high`.
+`npm test` (`test/run.mjs`) starts one throwaway server per suite (free port, temp `DATA_DIR`, shared temp `CACHE_DIR` seeded from `server/.cache`), never touches your data, and runs: the frozen API contract, integration, proxy, the image (logo) relay, account and billing, catalog, server hardening, and sliding sessions. With no cache and iptv-org unreachable it skips with a clear message. Details: [docs/TESTS.md](docs/TESTS.md). CI (`.github/workflows/ci.yml`) runs typecheck, build, the i18n key check, `npm test` and `npm audit --omit=dev --audit-level=high`.
 
 Quick manual check:
 

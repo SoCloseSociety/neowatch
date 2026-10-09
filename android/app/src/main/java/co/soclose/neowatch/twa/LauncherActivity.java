@@ -5,11 +5,13 @@ import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.UiModeManager;
 import android.content.ActivityNotFoundException;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
 import android.media.AudioManager;
 import android.net.Uri;
@@ -17,6 +19,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.provider.MediaStore;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
@@ -26,6 +30,7 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.RenderProcessGoneDetail;
+import android.webkit.URLUtil;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -35,6 +40,18 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.Toast;
+
+import org.json.JSONException;
+import org.json.JSONTokener;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * NEOWATCH Android TV shell: one Activity, the system WebView, nothing else.
@@ -50,7 +67,9 @@ import android.widget.Toast;
  *  - BACK: leave fullscreen, else ask the page (window.__nwBack, 300 ms budget), else WebView
  *    history, then leave the app;
  *  - on a TV, the web app's TV switch (localStorage nw.tv) is set for every page of ours;
- *  - a main-frame load error shows a small dark "No connection" page that retries every 10 s.
+ *  - a main-frame load error shows a small dark "No connection" page that retries every 10 s;
+ *  - a file the page makes itself (a blob: of ours, e.g. "Download my data") is saved by the
+ *    shell: the WebView never saves an a[download] itself, and no other app can open a blob:.
  */
 public class LauncherActivity extends Activity {
 
@@ -65,6 +84,14 @@ public class LauncherActivity extends Activity {
     private static final long BACK_JS_TIMEOUT_MS = 300L;
     private static final String STATE_URL = "neowatch.url";
     private static final String RETRY_URL = "neowatch-shell://retry";
+    // A blob: the page created (URL.createObjectURL), so of our origin. Strict, so it can be
+    // pasted into the JS below as is.
+    private static final Pattern OWN_BLOB = Pattern.compile(
+            "blob:https://neowatch\\.soclose\\.co/[0-9A-Fa-f-]{36}");
+    private static final int SAVE_MAX_CHARS = 2 * 1024 * 1024;
+    private static final long SAVE_POLL_MS = 150L;
+    private static final long SAVE_TIMEOUT_MS = 15_000L;
+    private static final int REQ_SAVE = 41;
     // The web app's TV switch (web/src/lib/device.ts): localStorage "nw.tv" = "1" turns on the
     // 10-foot layout + D-pad autofocus. A TV WebView user agent does not say "TV", so the shell
     // sets it on a TV, at the start of every page of ours (before the app's deferred scripts).
@@ -105,6 +132,8 @@ public class LauncherActivity extends Activity {
     private boolean showingError;
     private boolean resumed;
     private boolean isTv;
+    private byte[] pendingSave;         // API 23-28: waiting for the "save as" screen's answer
+    private final Rect visibleFrame = new Rect();
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -117,11 +146,12 @@ public class LauncherActivity extends Activity {
         root.setBackgroundColor(BG);
         setContentView(root);
         isTv = isTelevision();
+        if (!isTv) followKeyboard();
 
         String saved = savedInstanceState == null ? null : savedInstanceState.getString(STATE_URL);
+        String restored = saved == null ? null : ownUrl(Uri.parse(saved), false);
         String fromIntent = urlFromIntent(getIntent());
-        String start = saved != null && isOwnUrl(Uri.parse(saved)) ? saved
-                : fromIntent != null ? fromIntent : START_URL;
+        String start = restored != null ? restored : fromIntent != null ? fromIntent : START_URL;
 
         createWebView();
         load(start);
@@ -217,7 +247,10 @@ public class LauncherActivity extends Activity {
         web.setWebViewClient(new ShellClient());
         chrome = new ShellChrome();
         web.setWebChromeClient(chrome);
-        web.setDownloadListener((url, ua, disposition, mime, length) -> openExternally(Uri.parse(url)));
+        web.setDownloadListener((url, ua, disposition, mime, length) -> {
+            if (url != null && OWN_BLOB.matcher(url).matches()) saveBlob(url, disposition, mime);
+            else openExternally(Uri.parse(url));
+        });
 
         root.addView(web, 0, matchParent());
         web.requestFocus();
@@ -243,18 +276,34 @@ public class LauncherActivity extends Activity {
 
     /** Only https://neowatch.soclose.co (exact host) is loaded in the shell. */
     static boolean isOwnUrl(Uri uri) {
-        return uri != null
-                && "https".equalsIgnoreCase(uri.getScheme())
-                && HOST.equalsIgnoreCase(uri.getHost());
+        return ownUrl(uri, false) != null;
+    }
+
+    /**
+     * The URL to load for {@code uri} if it is ours, REBUILT from its checked parts, else null.
+     * The whole raw authority must be exactly our host (no user info, no port): an unpatched
+     * android.net.Uri (API 23 to 26) ends the authority only at '/', '?' or '#', so for
+     * "https://evil.example\@neowatch.soclose.co/" its getHost() is ours while Chromium (which
+     * also ends it at a backslash) loads evil.example. That raw authority is not our host, so it
+     * is refused; and the URL handed to the WebView is the rebuilt one, never the raw string.
+     * {@code upgradeHttp}: http on our host becomes https.
+     */
+    static String ownUrl(Uri uri, boolean upgradeHttp) {
+        if (uri == null) return null;
+        String scheme = uri.getScheme();
+        if (!"https".equalsIgnoreCase(scheme) && !(upgradeHttp && "http".equalsIgnoreCase(scheme))) return null;
+        if (!HOST.equalsIgnoreCase(uri.getEncodedAuthority())) return null;
+        return new Uri.Builder().scheme("https").encodedAuthority(HOST)
+                .encodedPath(uri.getEncodedPath())
+                .encodedQuery(uri.getEncodedQuery())
+                .encodedFragment(uri.getEncodedFragment())
+                .build().toString();
     }
 
     /** The URL a VIEW intent asks for, if it is ours (http is upgraded to https), else null. */
     static String urlFromIntent(Intent intent) {
         if (intent == null || !Intent.ACTION_VIEW.equals(intent.getAction())) return null;
-        Uri data = intent.getData();
-        if (data == null || !HOST.equalsIgnoreCase(data.getHost())) return null;
-        if ("http".equalsIgnoreCase(data.getScheme())) data = data.buildUpon().scheme("https").build();
-        return isOwnUrl(data) ? data.toString() : null;
+        return ownUrl(intent.getData(), true);
     }
 
     /**
@@ -263,8 +312,9 @@ public class LauncherActivity extends Activity {
      */
     private boolean routeNavigation(WebView view, Uri uri) {
         if (isOwnUrl(uri)) return false;
-        if (uri != null && "http".equalsIgnoreCase(uri.getScheme()) && HOST.equalsIgnoreCase(uri.getHost())) {
-            view.loadUrl(uri.buildUpon().scheme("https").build().toString());
+        String upgraded = uri != null && "http".equalsIgnoreCase(uri.getScheme()) ? ownUrl(uri, true) : null;
+        if (upgraded != null) {
+            view.loadUrl(upgraded);
             return true;
         }
         openExternally(uri);
@@ -484,6 +534,155 @@ public class LauncherActivity extends Activity {
         });
         errorView.setVisibility(View.GONE);
         root.addView(errorView, matchParent());
+    }
+
+    // ------------------------------------------------------------------ files the page makes
+
+    /**
+     * Saves a blob: of ours (the account's "Download my data"). The WebView hands an a[download]
+     * to the DownloadListener instead of saving it, and a blob: lives only inside the page, so
+     * the page reads it (fetch, text) into window.__nwSave[key] and the shell polls for it with
+     * evaluateJavascript: no JavaScript interface is added (iframes would see one too).
+     * API 29+: written to Downloads (no permission). API 23-28: a "save as" screen. Every path
+     * ends on a toast that says whether the file was saved.
+     */
+    private void saveBlob(String blobUrl, String disposition, String mime) {
+        if (web == null) return;
+        final WebView target = web;
+        final String key = Long.toHexString(new SecureRandom().nextLong());
+        target.evaluateJavascript("(function(u,k){var s=window.__nwSave||(window.__nwSave={});s[k]=0;"
+                + "fetch(u).then(function(r){return r.text()}).then(function(t){s[k]=t.length>"
+                + SAVE_MAX_CHARS + "?false:t},function(){s[k]=false})})('" + blobUrl + "','" + key + "')", null);
+        final String type = mime == null || mime.trim().isEmpty() ? "text/plain"
+                : mime.split(";")[0].trim().toLowerCase(Locale.ROOT);
+        final String name = downloadName(blobUrl, disposition, type);
+        final long deadline = SystemClock.uptimeMillis() + SAVE_TIMEOUT_MS;
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (web != target || isFinishing()) return;
+                final Runnable again = this;
+                target.evaluateJavascript("(function(k){var s=window.__nwSave,v=s&&s[k];"
+                        + "if(v===0||v===undefined)return null;delete s[k];return v})('" + key + "')", v -> {
+                    if (web != target || isFinishing()) return;
+                    if (v == null || "null".equals(v)) {
+                        if (SystemClock.uptimeMillis() < deadline) handler.postDelayed(again, SAVE_POLL_MS);
+                        else saveFailed();
+                        return;
+                    }
+                    Object text;
+                    try {
+                        text = new JSONTokener(v).nextValue();
+                    } catch (JSONException e) {
+                        text = null;
+                    }
+                    if (text instanceof String) writeDownload(name, type, (String) text);
+                    else saveFailed();
+                });
+            }
+        }, SAVE_POLL_MS);
+    }
+
+    /** The page's file name when the WebView passes one, else "neowatch-<date>.<ext>". */
+    static String downloadName(String url, String disposition, String type) {
+        if (disposition != null && disposition.toLowerCase(Locale.ROOT).contains("filename")) {
+            String guessed = URLUtil.guessFileName(url, disposition, type);
+            if (guessed != null && !guessed.isEmpty()) return guessed.replaceAll("[/\\\\]", "_");
+        }
+        String ext = type.contains("json") ? "json" : type.equals("text/csv") ? "csv" : "txt";
+        return "neowatch-" + new SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.ROOT).format(new Date()) + "." + ext;
+    }
+
+    private void writeDownload(String name, String type, String text) {
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        if (Build.VERSION.SDK_INT >= 29) {
+            Uri item = null;
+            try {
+                ContentValues v = new ContentValues();
+                v.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+                v.put(MediaStore.MediaColumns.MIME_TYPE, type);
+                item = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+                if (item == null) throw new IOException("no Downloads entry");
+                writeTo(item, bytes);
+                Toast.makeText(this, getString(R.string.download_saved, name), Toast.LENGTH_LONG).show();
+            } catch (IOException | RuntimeException e) {
+                Log.w(TAG, "download not saved", e);
+                if (item != null) {
+                    try {
+                        getContentResolver().delete(item, null, null);
+                    } catch (RuntimeException ignore) {
+                        // nothing more to clean
+                    }
+                }
+                saveFailed();
+            }
+            return;
+        }
+        // API 23-28: public Downloads needs a storage permission; let the user pick the place.
+        Intent pick = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType(type)
+                .putExtra(Intent.EXTRA_TITLE, name);
+        try {
+            pendingSave = bytes;
+            startActivityForResult(pick, REQ_SAVE);
+        } catch (ActivityNotFoundException | SecurityException e) {
+            pendingSave = null;
+            saveFailed();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_SAVE) return;
+        byte[] bytes = pendingSave;
+        pendingSave = null;
+        Uri dest = data == null ? null : data.getData();
+        if (resultCode != RESULT_OK || dest == null || bytes == null) {
+            saveFailed();
+            return;
+        }
+        try {
+            writeTo(dest, bytes);
+            String name = dest.getLastPathSegment();
+            Toast.makeText(this, getString(R.string.download_saved, name == null ? "" : name), Toast.LENGTH_LONG).show();
+        } catch (IOException | RuntimeException e) {
+            Log.w(TAG, "download not saved", e);
+            saveFailed();
+        }
+    }
+
+    private void writeTo(Uri dest, byte[] bytes) throws IOException {
+        try (OutputStream out = getContentResolver().openOutputStream(dest)) {
+            if (out == null) throw new IOException("no output stream");
+            out.write(bytes);
+        }
+    }
+
+    private void saveFailed() {
+        Toast.makeText(this, R.string.download_failed, Toast.LENGTH_LONG).show();
+    }
+
+    // ------------------------------------------------------------------ soft keyboard (phones)
+
+    /**
+     * The window is fullscreen (theme + immersive flags), and under FLAG_FULLSCREEN
+     * adjustResize is ignored (API 23-29): the window never shrinks for the soft keyboard, so the
+     * WebView never learns it is up and a focused field stays under it. Pad the root by the part
+     * of it the keyboard covers (the visible frame ends at the keyboard's top). Where the window
+     * does resize, nothing is covered and the padding stays 0. Phones and tablets only.
+     */
+    private void followKeyboard() {
+        final int[] at = new int[2];
+        root.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            root.getWindowVisibleDisplayFrame(visibleFrame);
+            root.getLocationOnScreen(at);
+            int covered = at[1] + root.getHeight() - visibleFrame.bottom;
+            // Less than 15% of the screen is a navigation bar, not a keyboard.
+            int pad = covered > root.getRootView().getHeight() * 0.15f ? covered : 0;
+            if (pad != root.getPaddingBottom()) root.setPadding(0, 0, 0, pad);
+        });
     }
 
     // ------------------------------------------------------------------ keys

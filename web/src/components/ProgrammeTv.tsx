@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { ArrowLeft, Radio, CalendarClock } from 'lucide-react';
@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import { categoryLabel } from '@/lib/format';
 import type { Channel } from '@/types';
 import { useCatalog } from '@/store/catalogStore';
-import { usePlayer } from '@/store/playerStore';
+import { usePlayer, guideStub } from '@/store/playerStore';
 import { useUI } from '@/store/uiStore';
 import { useT, fmtTime } from '@/lib/i18n';
 import { EmptyState, LogoImg, Spinner, btnClass } from './ui';
@@ -17,6 +17,7 @@ interface GC { id: string; name: string; logo: string | null; flag: string | nul
 
 const PX_PER_MIN = 5;   // 1h = 300px
 const LABEL_W = 180;
+const LABEL_W_PHONE = 120; // a phone keeps more of the time axis in view
 const ROW_H = 60;
 const HOURS = 14;       // visible window length (scrollable)
 const MIN_W = 24;       // narrower blocks are not drawn (no readable text fits)
@@ -32,8 +33,11 @@ function layout(programmes: GP[], xOf: (ms: number) => number, gridW: number): B
     const end = p.stop && p.stop > p.start ? p.stop : p.start + 3600000;
     const left = Math.max(0, xOf(p.start), edge);
     const right = Math.min(gridW, xOf(end));
-    if (right - left < MIN_W) continue;
-    out.push({ p, left, width: right - left - 2, end });
+    const width = right - left - 2;
+    // At the row start a block abuts the channel label: its DRAWN width must reach
+    // the 24 px target itself (WCAG 2.5.8); mid-row the 2 px gaps give the spacing.
+    if (right - left < MIN_W || (left === 0 && width < MIN_W)) continue;
+    out.push({ p, left, width, end });
     edge = right;
   }
   return out;
@@ -56,6 +60,13 @@ export function ProgrammeTv() {
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [reload, setReload] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [labelW, setLabelW] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 640 ? LABEL_W_PHONE : LABEL_W));
+  useEffect(() => {
+    const onResize = () => setLabelW(window.innerWidth < 640 ? LABEL_W_PHONE : LABEL_W);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const back = () => {
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
@@ -91,6 +102,15 @@ export function ProgrammeTv() {
   const hourMarks = Array.from({ length: HOURS }, (_, i) => windowStart + i * 3600000);
   const nowX = xOf(now);
 
+  // The window starts an hour back: open on now (the now line near the left
+  // edge, the programme on air in view), not on the past hour (QA-13).
+  useEffect(() => {
+    if (state !== 'ready' || !channels.length) return;
+    const sc = scrollerRef.current;
+    if (sc) sc.scrollLeft = Math.max(0, xOf(Date.now()) - 60);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, channels]);
+
   // The grid carries a short projection: fetch the playable channel, then play it.
   const playChannel = async (g: GC) => {
     if (g.locked) return setPricing(true);
@@ -99,7 +119,12 @@ export function ProgrammeTv() {
     try {
       const c = await api.get<Channel>(`/catalog/channel/${encodeURIComponent(g.id)}?channelId=${encodeURIComponent(g.channelId)}`);
       if (c.locked) setPricing(true);
-      else { addRecent(c); play(c); }
+      else {
+        addRecent(c);
+        // Zapping follows the guide's rows (resolved as it reaches them, WEB-17).
+        const queue = channels.filter((r) => !r.locked).map((r) => (r.id === g.id ? c : guideStub(r)));
+        play(c, { queue });
+      }
     } catch {
       navigate(`/chaine/${g.id}`);
     } finally {
@@ -150,11 +175,11 @@ export function ProgrammeTv() {
             <EmptyState icon={<CalendarClock size={32} />} title={t('pages.guide.emptyAllTitle')} body={t('pages.guide.emptyBody')} action={{ label: t('empty.browseChannels'), onClick: () => navigate('/'), variant: 'primary' }} />
           )
         ) : (
-          <div className="nw-thin overflow-x-auto rounded-card border border-line bg-card">
-            <div className="relative" style={{ width: LABEL_W + gridW }}>
+          <div ref={scrollerRef} className="nw-thin overflow-x-auto rounded-card border border-line bg-card">
+            <div className="relative" style={{ width: labelW + gridW }}>
               {/* Time header */}
               <div className="sticky top-0 z-20 flex h-9 border-b border-line bg-[var(--bg-1)]">
-                <div className="sticky left-0 z-10 shrink-0 border-r border-line bg-[var(--bg-1)]" style={{ width: LABEL_W }} />
+                <div className="sticky left-0 z-10 shrink-0 border-r border-line bg-[var(--bg-1)]" style={{ width: labelW }} />
                 <div className="relative" style={{ width: gridW }}>
                   {hourMarks.map((h) => (
                     <span key={h} className="meta absolute top-2" style={{ left: xOf(h) + 6 }}>{fmtTime(h)}</span>
@@ -169,11 +194,11 @@ export function ProgrammeTv() {
                     type="button"
                     onClick={() => navigate(`/chaine/${ch.id}`)}
                     className="sticky left-0 z-10 flex shrink-0 items-center gap-2.5 border-r border-line bg-[var(--bg-1)] px-3 text-left"
-                    style={{ width: LABEL_W }}
+                    style={{ width: labelW }}
                     aria-label={ch.name}
                   >
-                    <span className="grid h-8 w-10 shrink-0 place-items-center overflow-hidden rounded-field bg-mini" aria-hidden="true">
-                      <LogoImg src={ch.logo} width={40} height={32} loading="lazy" fallback={<Radio size={14} className="text-ink-3" />} className="max-h-[80%] max-w-[85%] object-contain" />
+                    <span className="grid h-8 w-10 shrink-0 place-items-center overflow-hidden rounded-field bg-[var(--plaque-mini)]" aria-hidden="true">
+                      <LogoImg src={ch.logo} w={96} width={40} height={32} loading="lazy" fallback={<Radio size={14} className="text-[color:var(--plaque-encre-3)]" />} className="max-h-[80%] max-w-[85%] object-contain" />
                     </span>
                     <span className="truncate text-sous font-semibold text-ink" translate="no">{ch.name}</span>
                   </button>
@@ -206,7 +231,7 @@ export function ProgrammeTv() {
 
               {/* Now line */}
               {nowX >= 0 && nowX <= gridW && (
-                <div className="pointer-events-none absolute bottom-0 top-0 z-[15] w-[2px] bg-red" style={{ left: LABEL_W + nowX }} aria-hidden="true" />
+                <div className="pointer-events-none absolute bottom-0 top-0 z-[15] w-[2px] bg-red" style={{ left: labelW + nowX }} aria-hidden="true" />
               )}
             </div>
           </div>

@@ -123,11 +123,11 @@ export const ChannelCard = memo(function ChannelCard({ channel: ch, health, onPl
         className
       )}
     >
-      {/* 16:9 plate: the logo centred on --bg-3, or a monogram */}
-      <span className="card-surface flex w-full items-center justify-center bg-[var(--bg-3)] pb-2 pt-[calc(var(--pastille-h)_+_10px)]">
+      {/* 16:9 plate: the logo centred on --plaque (dark in both styles), or a monogram */}
+      <span className="card-surface flex w-full items-center justify-center bg-[var(--plaque)] pb-2 pt-[calc(var(--pastille-h)_+_10px)]">
         {ch.logo && !imgFailed ? (
           <img
-            src={imgSrc(ch.logo)}
+            src={imgSrc(ch.logo, 320)}
             alt=""
             width={160}
             height={90}
@@ -138,7 +138,7 @@ export const ChannelCard = memo(function ChannelCard({ channel: ch, health, onPl
             className="h-auto max-h-[78%] w-auto max-w-[72%] object-contain"
           />
         ) : (
-          <span aria-hidden="true" translate="no" className="font-mono text-titre2 font-semibold text-ink-2">
+          <span aria-hidden="true" translate="no" className="font-mono text-titre2 font-semibold text-[color:var(--plaque-encre)]">
             {monogram(ch.name)}
           </span>
         )}

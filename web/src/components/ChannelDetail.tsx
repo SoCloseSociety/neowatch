@@ -10,7 +10,7 @@ import { usePlayer } from '@/store/playerStore';
 import { useCatalog } from '@/store/catalogStore';
 import { useUI, toast } from '@/store/uiStore';
 import { useT, fmtTime, fmtAge } from '@/lib/i18n';
-import { Button, Data, EmptyState, HealthPill, LogoImg, Meta, Overline, Pill, Spinner, btnClass } from './ui';
+import { AmbianceImg, Button, Data, EmptyState, HealthPill, LogoImg, Meta, Overline, Pill, Spinner, btnClass } from './ui';
 import { LEGAL_CONTACT } from './Legal';
 import { countryLabel, languageLabel } from './ChannelCard';
 import { isTV } from '@/lib/device';
@@ -134,7 +134,6 @@ export function ChannelDetail() {
   const inMulti = isInMulti(ch.url);
   const cat = ch.categories?.find((c) => c && c !== 'undefined') || null;
   const ambCat = ch.categories?.find((c) => AMBIANCE[c]);
-  const art = ambCat ? `url(/ambiance/${AMBIANCE[ambCat]}.webp)` : 'linear-gradient(var(--fond-image), var(--fond-image))';
   const now = epg?.now;
   const next = epg?.next;
   const progress = now && now.stop ? Math.min(100, Math.max(0, ((Date.now() - now.start) / (now.stop - now.start)) * 100)) : null;
@@ -178,20 +177,22 @@ export function ChannelDetail() {
             keeps a light fill here so it reads on the image in Doux too. */}
         <section
           data-hero=""
-          className="relative overflow-hidden bg-cover bg-center"
+          className="relative overflow-hidden bg-[var(--fond-image)]"
           style={{
-            backgroundImage: `var(--voile-hero), ${art}`,
             ['--primaire-fond' as string]: 'var(--encre-image)',
             ['--primaire-encre' as string]: '#0a0d10',
           }}
         >
+          {/* The category artwork (an <img>: the page's largest paint, PERF-4), under its scrim. */}
+          {ambCat && <AmbianceImg name={AMBIANCE[ambCat]} sizes="(min-width: 1760px) 1760px, 100vw" className="absolute inset-0" />}
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0" style={{ backgroundImage: 'var(--voile-hero)' }} />
           <div className="relative flex flex-col gap-6 px-[var(--gouttiere)] pb-8 pt-5">
             <button type="button" onClick={back} className={btnClass('quiet', { className: 'w-fit px-3 text-on-image' })} aria-label={t('detail.back')}>
               <ArrowLeft size={16} aria-hidden="true" /> {t('detail.back')}
             </button>
             <div className="flex flex-wrap items-end gap-6">
-              <div className="grid h-20 w-32 shrink-0 sm:h-28 sm:w-44 place-items-center overflow-hidden rounded-card border border-line bg-card" aria-hidden="true">
-                <LogoImg key={ch.logo || ''} src={ch.logo} width={176} height={112} fallback={<Radio className="text-ink-3" size={40} />} className="max-h-[70%] max-w-[80%] object-contain" />
+              <div className="grid h-20 w-32 shrink-0 sm:h-28 sm:w-44 place-items-center overflow-hidden rounded-card border border-line bg-[var(--plaque)]" aria-hidden="true">
+                <LogoImg key={ch.logo || ''} src={ch.logo} w={640} width={176} height={112} fallback={<Radio className="text-[color:var(--plaque-encre-3)]" size={40} />} className="max-h-[70%] max-w-[80%] object-contain" />
               </div>
               <div className="flex min-w-0 flex-1 basis-[320px] flex-col gap-3">
                 <div className="flex flex-wrap items-center gap-2.5">
@@ -310,8 +311,8 @@ export function ChannelDetail() {
                 >
                   {/* Positioned plate: the logo's % caps resolve against the 16:9 box, so a
                       tall logo can never stretch one card above its row. */}
-                  <span className="relative block aspect-video bg-mini" aria-hidden="true">
-                    <LogoImg src={s.logo} width={144} height={81} loading="lazy" fallback={<Radio className="absolute inset-0 m-auto text-ink-3" />} className="absolute inset-0 m-auto max-h-[60%] max-w-[72%] object-contain" />
+                  <span className="relative block aspect-video bg-[var(--plaque-mini)]" aria-hidden="true">
+                    <LogoImg src={s.logo} w={320} width={144} height={81} loading="lazy" fallback={<Radio className="absolute inset-0 m-auto text-[color:var(--plaque-encre-3)]" />} className="absolute inset-0 m-auto max-h-[60%] max-w-[72%] object-contain" />
                   </span>
                   <span className="block truncate px-3 py-2 text-sous font-semibold text-ink" translate="no">{s.name}</span>
                 </button>

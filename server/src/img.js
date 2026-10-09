@@ -27,7 +27,8 @@ import { isKnownRadioIcon } from './radio.js';
 //    the sniffed Content-Type, nosniff, a sandboxing CSP, CORP same-origin, and a
 //    public 24 h cache;
 //  - bounded memory: an LRU of 32 MB / 1000 images, a 10 min negative cache so a dead
-//    logo host is asked once, at most 16 upstream fetches at a time, a per-IP rate limit.
+//    logo host is asked once, at most 16 upstream fetches at a time (queued fairly per
+//    client), a hanging host skipped for a minute, a per-IP rate limit.
 //
 // Mounted before `authenticate` (index.js): an <img> sends no Authorization, and a
 // response that is publicly cacheable must never carry a renewed session token.
@@ -38,7 +39,7 @@ const MAX_BYTES = 1024 * 1024;
 const TIMEOUT_MS = 10_000;
 const MAX_URL = 2048;
 const CACHE_BUDGET = 32 * 1024 * 1024;
-const CACHE_MAX = 1000;
+const CACHE_MAX = 3000; // entries; the byte budget above is the real bound
 const CACHE_TTL_MS = 24 * 3600 * 1000;
 const NEG_TTL_MS = 10 * 60 * 1000;
 const NEG_MAX = 5000;
@@ -120,18 +121,69 @@ function negSet(url, status) {
 }
 
 // ── upstream concurrency ──────────────────────────────────────────────────
+// At most MAX_ACTIVE fetches run; the rest wait in one FIFO per client, served round
+// robin. When the waiting room is full, the client holding the most waiting fetches gives
+// up its newest one: a single client (a page full of logos on hanging hosts) can no
+// longer fill the queue and turn every other viewer's uncached logos into 503s.
 let active = 0;
-const queue = [];
-function acquire() {
+let waiting = 0;
+const queues = new Map(); // client -> [{ resolve, reject }] (Map order = round-robin turn)
+const busy = () => Object.assign(new Error('busy'), { status: 503, transient: true });
+function acquire(client) {
   if (active < MAX_ACTIVE) { active++; return Promise.resolve(); }
-  if (queue.length >= MAX_QUEUED) return Promise.reject(Object.assign(new Error('busy'), { status: 503, transient: true }));
-  return new Promise((resolve) => queue.push(resolve));
+  if (waiting >= MAX_QUEUED) {
+    let heavy = null;
+    for (const [c, q] of queues) if (!heavy || q.length > queues.get(heavy).length) heavy = c;
+    const mine = queues.get(client)?.length || 0;
+    if (heavy === null || queues.get(heavy).length <= mine + 1) return Promise.reject(busy());
+    const hq = queues.get(heavy);
+    hq.pop().reject(busy());
+    waiting--;
+    if (!hq.length) queues.delete(heavy);
+  }
+  return new Promise((resolve, reject) => {
+    let q = queues.get(client);
+    if (!q) queues.set(client, (q = []));
+    q.push({ resolve, reject });
+    waiting++;
+  });
 }
 function release() {
-  const next = queue.shift();
-  if (next) next(); // the slot passes on
-  else active--;
+  for (const [c, q] of queues) {
+    const next = q.shift();
+    waiting--;
+    queues.delete(c);
+    if (q.length) queues.set(c, q); // to the back of the round robin
+    next.resolve(); // the slot passes on
+    return;
+  }
+  active--;
 }
+
+// A host whose fetches hit the 10 s deadline HOST_TRIP times in a row (no success in
+// between) is not contacted for HOST_DOWN_MS: its queued logos fail at once instead of
+// holding a slot 10 s each. One success resets the count (a busy healthy host never trips).
+const HOST_TRIP = 3;
+const HOST_DOWN_MS = 60_000;
+const hosts = new Map(); // host -> { fails, until }
+const hostOf = (url) => { try { return new URL(url).host; } catch { return ''; } };
+function hostDown(host) {
+  const h = hosts.get(host);
+  if (!h?.until) return false;
+  if (h.until > Date.now()) return true;
+  h.until = 0; // half open: the next fetch tries again (one more timeout re-trips it)
+  h.fails = HOST_TRIP - 1;
+  return false;
+}
+function hostResult(host, timedOut) {
+  if (!timedOut) { hosts.delete(host); return; }
+  const h = hosts.get(host) || { fails: 0, until: 0 };
+  if (++h.fails >= HOST_TRIP) h.until = Date.now() + HOST_DOWN_MS;
+  hosts.delete(host);
+  hosts.set(host, h);
+  while (hosts.size > NEG_MAX) hosts.delete(hosts.keys().next().value);
+}
+const unreachable = () => Object.assign(new Error('upstream unreachable'), { status: 504, transient: true });
 
 const failure = (status, msg) => Object.assign(new Error(msg), { status });
 
@@ -164,27 +216,56 @@ async function fetchOnce(url, privateHost, signal) {
 }
 
 // imgur hosts ~70 % of the catalog logos, many as 2000 px PNGs (100-250 KB) shown at
-// 300 px. It serves its own 640 px WebP rendition (alpha kept) at <id>l.webp: when the
-// original is big, that rendition is tried and the smaller of the two is kept. Same
-// host, derived from a vended URL; a failure keeps the original. No GIF (animation).
+// 300 px. It serves its own WebP renditions (alpha kept): <id>m.webp (320 px) and
+// <id>l.webp (640 px); <id>t.webp does NOT exist (302 to an HTML page). Same host,
+// derived from a vended URL; a failure keeps the original. No GIF (animation).
 const IMGUR = /^https:\/\/i\.imgur\.com\/([A-Za-z0-9]{5,10})\.(?:png|jpe?g|webp)$/i;
 const IMGUR_BIG = 48 * 1024;
-export function imgurRendition(url) {
+export function imgurRendition(url, size = 'l') {
   const m = IMGUR.exec(url);
-  return m ? `https://i.imgur.com/${m[1]}l.webp` : null;
+  return m ? `https://i.imgur.com/${m[1]}${size}.webp` : null;
+}
+// Wikimedia thumbnails (/thumb/<path>/<n>px-<name>) come at 960 px for a 130 px slot. Its
+// standard thumbnail steps include 120 and 330 px; the path is only ever made SMALLER.
+const WIKI = /^(https:\/\/upload\.wikimedia\.org\/wikipedia\/[^?#]+\/thumb\/[^?#]+\/)(\d{2,4})px-([^/?#]+)$/;
+const WIKI_STEP = { 96: 120, 320: 330 };
+
+// Display-size hint from the page (?w=): 96 (guide, radios), 320 (cards), 640 (hero).
+// Anything else = no hint (the legacy behaviour: imgur's 640 px rendition when big).
+export const IMG_WIDTHS = [96, 320, 640];
+export function renditionFor(url, w) {
+  if (!w) return null;
+  const imgur = imgurRendition(url, w <= 320 ? 'm' : 'l');
+  if (imgur) return imgur;
+  const m = WIKI.exec(url);
+  const step = WIKI_STEP[w];
+  return m && step && Number(m[2]) > step ? `${m[1]}${step}px-${m[3]}` : null;
 }
 
-async function fetchImage(url, privateHost) {
-  await acquire();
+async function fetchImage(url, privateHost, w, client) {
+  const host = hostOf(url);
+  if (hostDown(host)) throw unreachable();
+  await acquire(client);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    let img = await fetchOnce(url, privateHost, ctrl.signal);
-    const smaller = img.body.length > IMGUR_BIG ? imgurRendition(url) : null;
+    if (hostDown(host)) throw unreachable(); // tripped while this one was waiting
+    let img;
+    try {
+      img = await fetchOnce(url, privateHost, ctrl.signal);
+      hostResult(host, false);
+    } catch (e) {
+      // Any answer (a 404, an SVG...) proves the host alive; only our deadline counts.
+      hostResult(host, ctrl.signal.aborted);
+      throw e;
+    }
+    // With a size hint the rendition is always tried; without one, only for a big imgur
+    // original. The smaller of the two is kept (a rendition is never a GIF: animation).
+    const smaller = w ? renditionFor(url, w) : img.body.length > IMGUR_BIG ? imgurRendition(url) : null;
     if (smaller) {
       try {
         const alt = await fetchOnce(smaller, null, ctrl.signal);
-        if (alt.type === 'image/webp' && alt.body.length < img.body.length) img = alt;
+        if (alt.type !== 'image/gif' && alt.body.length < img.body.length) img = alt;
       } catch { /* keep the original */ }
     }
     return { ...img, exp: Date.now() + CACHE_TTL_MS };
@@ -196,11 +277,11 @@ async function fetchImage(url, privateHost) {
 
 // One upstream fetch per URL at a time, shared by concurrent viewers.
 const inflight = new Map();
-function load(url, privateHost) {
-  let p = inflight.get(url);
+function load(key, url, privateHost, w, client) {
+  let p = inflight.get(key);
   if (!p) {
-    p = fetchImage(url, privateHost).finally(() => inflight.delete(url));
-    inflight.set(url, p);
+    p = fetchImage(url, privateHost, w, client).finally(() => inflight.delete(key));
+    inflight.set(key, p);
   }
   return p;
 }
@@ -245,13 +326,17 @@ imgRouter.get('/img', imgLimit, async (req, res) => {
   if (typeof u !== 'string' || !u || u.length > MAX_URL || !/^https?:\/\//i.test(u)) return fail(res, 400, 'bad request');
   const src = sourceOf(u);
   if (!src) return fail(res, 404, 'not found');
-  let img = cacheGet(u);
+  // An unknown w is ignored (no hint), never an error: an old page keeps working.
+  const wn = Number(typeof req.query.w === 'string' ? req.query.w : 0);
+  const w = IMG_WIDTHS.includes(wn) ? wn : 0;
+  const key = w ? `${w}|${u}` : u; // one cached copy per (url, size)
+  let img = cacheGet(key);
   if (!img) {
-    const known = negGet(u);
+    const known = negGet(u); // the original's failure: the same for every size
     if (known) return noImage(req, res, known, 'unavailable');
     try {
-      img = await load(u, src.privateHost);
-      cacheSet(u, img);
+      img = await load(key, u, src.privateHost, w, req.ip || req.socket?.remoteAddress || '');
+      cacheSet(key, img);
     } catch (e) {
       const status = e?.status || 502;
       if (!e?.transient) negSet(u, status);

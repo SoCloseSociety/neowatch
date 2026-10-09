@@ -235,7 +235,28 @@ export function bindNavigate(fn: ((to: string, o?: { replace?: boolean }) => voi
   navigateFn = fn;
 }
 
+/**
+ * Something inside a layer that Back closes first (a player menu): the newest
+ * handler runs before the layer closes and returns true when it handled Back.
+ * Every Back path goes through it (TV keys, Escape on a TV, window.__nwBack).
+ */
+const backHandlers: (() => boolean)[] = [];
+export function pushBackHandler(fn: () => boolean): () => void {
+  backHandlers.push(fn);
+  return () => {
+    const i = backHandlers.lastIndexOf(fn);
+    if (i >= 0) backHandlers.splice(i, 1);
+  };
+}
+
+/** The current entry was pushed when a filtered view opened from Home (App useFilterUrlSync). */
+export function isGridEntry(): boolean {
+  const usr = historyState().usr as { nwGrid?: boolean } | undefined;
+  return !!usr?.nwGrid;
+}
+
 function back(kind: BackKind): boolean {
+  for (let i = backHandlers.length - 1; i >= 0; i -= 1) if (backHandlers[i]()) return true;
   const top = topLayer();
   if (top) {
     // Escape inside a modal that closes itself: leave the key to it.
@@ -253,8 +274,10 @@ function back(kind: BackKind): boolean {
     return true;
   }
   if (search) {
-    // A search or a filtered grid: Back returns to Home.
-    useCatalog.getState().resetFilters();
+    // A search or a filtered grid: Back returns to Home (pops the entry the grid
+    // pushed when it opened from Home, so entries never stack).
+    if (isGridEntry()) window.history.back();
+    else useCatalog.getState().resetFilters();
     return true;
   }
   const now = Date.now();
@@ -449,14 +472,33 @@ function move(dir: Dir, allowScroll = true) {
 
 const DIRS: Record<string, Dir> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
 
+/** The caret sits at the `dir` end of a text field (or the field is empty). */
+function caretAtEdge(el: HTMLElement, dir: 'left' | 'right'): boolean {
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return false;
+  if (!el.value) return true;
+  let start: number | null = null;
+  let end: number | null = null;
+  try {
+    start = el.selectionStart;
+    end = el.selectionEnd;
+  } catch {
+    return false; // a type without a caret (email, number)
+  }
+  if (start === null || end === null || start !== end) return false;
+  return dir === 'left' ? start === 0 : end === el.value.length;
+}
+
 function onArrow(e: KeyboardEvent) {
   if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
   const dir = DIRS[e.key];
   if (!dir) return;
   const tgt = e.target as HTMLElement | null;
   // In a text field, Left/Right move the caret; Up/Down still navigate. A range
-  // input (volume) keeps Left/Right too.
-  if (tgt && (isField(tgt) || (tgt as HTMLInputElement).type === 'range') && (dir === 'left' || dir === 'right')) return;
+  // input (volume) keeps Left/Right too. On a TV, Left/Right walk out of an empty
+  // field, or one whose caret is already at that end (the header search box).
+  if (tgt && (isField(tgt) || (tgt as HTMLInputElement).type === 'range') && (dir === 'left' || dir === 'right')) {
+    if (!isTV() || (tgt as HTMLInputElement).type === 'range' || !caretAtEdge(tgt, dir)) return;
+  }
   if (tgt && tgt.tagName === 'SELECT') return;
   e.preventDefault();
   move(dir);

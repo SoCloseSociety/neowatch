@@ -39,7 +39,7 @@
 - Never mark a task complete without proving it works. Ask: "Would a senior engineer approve this?"
 - Concretely for NEOWATCH:
   - `npm run typecheck` and `npm run build` must pass.
-  - `npm test` must pass (`test/run.mjs`: throwaway servers, contract + integration + proxy + account + catalog + session suites; see `docs/TESTS.md`).
+  - `npm test` must pass (`test/run.mjs`: throwaway servers, contract + integration + proxy + img (logo relay) + account + catalog + hardening + session suites; see `docs/TESTS.md`).
   - `curl localhost:8787/api/health` returns ok; `/api/catalog/meta` returns a non-zero `total`.
   - UI changes: `node test/verify-design.mjs <port> --pages <yours> --formats desktop,phone,tv --measure` on a throwaway server, and LOOK at the screenshots. `node test/verify-design.mjs --keys` checks every `t()` key exists in EN/FR/RU.
   - Open the app, play one HLS channel and one YouTube channel, open the multi-screen mosaic. `npm run test:e2e` (BASE=...) is the scripted version.
