@@ -161,7 +161,7 @@ export const pages = {
   'pages.legal.publisher': { en: 'Publisher', fr: 'Éditeur', ru: 'Издатель' },
   'pages.legal.contact': { en: 'Contact', fr: 'Contact', ru: 'Контакт' },
   'pages.legal.host': { en: 'Host', fr: 'Hébergeur', ru: 'Хостинг' },
-  'pages.legal.hostValue': { en: 'Details on request at the contact address.', fr: 'Coordonnées sur demande à l’adresse de contact.', ru: 'Данные по запросу на адрес для связи.' },
+  'pages.legal.hostValue': { en: 'IONOS SE · Elgendorfer Str. 57, 56410 Montabaur, Germany', fr: 'IONOS SE · Elgendorfer Str. 57, 56410 Montabaur, Allemagne', ru: 'IONOS SE · Elgendorfer Str. 57, 56410 Montabaur, Германия' },
   'pages.legal.takedownTitle': { en: 'Remove a stream', fr: 'Retirer un flux', ru: 'Удалить поток' },
   'pages.legal.takedownA': { en: 'Write to us with the channel name and its link.', fr: 'Écrivez-nous avec le nom de la chaîne et son lien.', ru: 'Напишите нам название канала и ссылку.' },
   'pages.legal.takedownB': { en: 'Each channel page has a Report button that fills this in.', fr: 'Chaque page de chaîne a un bouton Signaler qui le remplit.', ru: 'На странице канала есть кнопка жалобы с этими данными.' },
