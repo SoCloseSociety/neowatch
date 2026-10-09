@@ -1,4 +1,4 @@
-# NEOWATCH for Android TV -- WebView shell (v2.1.0)
+# NEOWATCH for Android TV -- WebView shell (v2.1.1)
 
 A minimal native Android app that shows `https://neowatch.soclose.co` full-screen in the
 device's **system WebView**. One Activity (`LauncherActivity.java`), zero third-party
@@ -8,7 +8,7 @@ dependencies, a ~250 kB APK. Since v2.1.0 it also carries three **phone home-scr
 - Package: **`co.soclose.neowatch.twa`** (FROZEN: Sentinel House launches the app by this
   package, and `web/public/.well-known/assetlinks.json` is bound to it). The `.twa` suffix is
   historical; the app is no longer a TWA.
-- versionCode **4**, versionName **2.1.0** (v2.0.0 was versionCode 3), minSdk 23, targetSdk 34, compileSdk 35.
+- versionCode **5**, versionName **2.1.1** (2.1.0 was versionCode 4, 2.0.0 was 3), minSdk 23, targetSdk 34, compileSdk 35.
 - Signed with the **existing** NEOWATCH key (alias `my-key-alias`, SHA-256
   `C8:6E:CD:...:F2:61`), so it installs over v1/v2 and the verified deep links keep working.
 
@@ -30,10 +30,11 @@ so the app now hosts the site in its own WebView. Same package, same key, same d
 | Launcher | `MAIN` + `LAUNCHER` + `LEANBACK_LAUNCHER`; 320x180 banner; leanback + touchscreen `required=false` (still installs on phones). Activity class name kept as `co.soclose.neowatch.twa.LauncherActivity` (same as the TWA) so pinned entries and `am start -n` still resolve. |
 | WebView | JS, DOM storage, database, autoplay (`mediaPlaybackRequiresUserGesture=false`), mixed content NEVER_ALLOW, no file/content access, Safe Browsing on, third-party cookies on (YouTube embeds), text zoom pinned to 100%, hardware accelerated. |
 | User agent | default WebView UA + `" NeoWatchTV/2.0"`: the web app can detect the shell with `/NeoWatchTV\//.test(navigator.userAgent)`. |
+| TV mode | On a TV (`UI_MODE_TYPE_TELEVISION` or the leanback feature), every page of ours gets `localStorage nw.tv = "1"` at page start (2.1.1). That is the web app's TV switch (`web/src/lib/device.ts`): 10-foot layout, focus ring, D-pad autofocus on "Watch now". The TV WebView user agent does not say "TV", so before 2.1.1 the shell ran the site in desktop mode on a TV and the first OK after launch did nothing (no element had focus). Phones never get the flag. |
 | Look | No action bar, fullscreen/immersive, `#05070a` window + WebView background set before the first load (no white flash). |
 | Fullscreen video | `onShowCustomView` / `onHideCustomView`; Back leaves fullscreen first. |
 | Screen | `FLAG_KEEP_SCREEN_ON` only while audio/video is actually playing (polled every 15 s), so an idle home screen still lets the TV screensaver / standby kick in. |
-| Keys | D-pad / Enter go to the page (the web app has its own spatial navigation). **Back**: leave fullscreen, else `WebView.goBack()` if possible, else `finish()`. **Play/Pause** (remote media key): a Space keydown is dispatched to the page (the player toggles on Space) only when a `<video>` exists. |
+| Keys | D-pad / Enter go to the page (the web app has its own spatial navigation). **Back** (2.1.1): leave fullscreen, else ask the page through `window.__nwBack()` (the web app's one Back contract, `web/src/lib/spatialNav.ts`): `true` = handled (closed the player / a modal, went back a page, a deep link with no history went Home, or the "Press Back again to exit" toast), `false` = nothing left (second Back within the toast window): `finish()`; no hook (older site, page still loading) = `WebView.goBack()` if possible, else `finish()`. The JS answer has a **300 ms budget**: past it, the shell does the history Back itself and ignores the late answer, so Back never feels dead. **Play/Pause** (remote media key): a Space keydown is dispatched to the page (the player toggles on Space) only when a `<video>` exists. |
 | Offline | A main-frame network error (or 502/503/504 on the page itself) shows a tiny dark page "No connection. Retrying..." with a focused Retry button, in a separate WebView so it never enters the site's back history. Retries 10 s after each failed attempt (immediately on Retry; paused while the app is in the background). |
 | Robustness | Renderer crash (`onRenderProcessGone`, low-RAM TV chips) rebuilds the WebView and reopens the current page instead of killing the app. |
 
@@ -53,6 +54,23 @@ recovery from offline (the emulator could not drop its network).
 Web-app finding from that run (not a shell issue): on a `/chaine/<id>` page the D-pad never lands
 on the **Regarder** button (Down goes from the logo straight to the "Chaines similaires" row, Up
 goes back to the top bar). This is the "fiche_ok_a_donner" limit Sentinel House already knows about.
+
+Emulator check of 2.1.1 (09/10/2026, Android TV API 34 emulator, WebView 113):
+
+| Case | Result |
+|---|---|
+| Live site ships the hook (desktop Chrome via Playwright) | `typeof window.__nwBack === 'function'`; 1st call `true` (toast), 2nd `false` |
+| (a) launch -> Home, OK on "Watch now", Back, Back, Back | release build: player opens; Back closes it, app stays, focus back on the channel card; Back at Home shows "Press Back again to exit"; a Back after the 2.6 s window shows the toast again; two Backs within it leave to the TV launcher |
+| (a) first OK right after launch | **bug found**: did nothing (site in desktop mode, nothing focused). Fixed by the TV flag above; re-checked on a fresh install: `data-tv` set on the first load, "Watch now" focused, the first OK opens the player |
+| 300 ms fallback | `__nwBack` replaced by a hook that blocks 1.5 s and returns `false`, player open: Back closes the player via history at 300 ms (`__nwBack did not answer in 300 ms` in logcat), the late `false` is ignored (app stays open) |
+| No hook | `__nwBack` deleted, player open: Back closes it via history; next Back leaves the app |
+| Playback | the hero channel (Glory Kickboxing) stayed on "Buffering..." on the emulator; actual video frames were not confirmed in this run |
+
+Not run in this pass (the test session lost adb access): (b) deep link `/chaine/<id>?play=1`
+Back chain, (c) the phone widget tap, (d) Back out of fullscreen video, (e) offline page / Retry
+focus, the phone emulator, and the final `apksigner` / `check_widgets.py` pass on the shipped APK.
+The fallback and TV-flag checks above used a debug build of the same code (WebView inspection);
+case (a) and the first-OK check used the signed release.
 
 ## Home-screen widgets (v2.1.0, phones)
 
@@ -177,7 +195,7 @@ Icons/banner are generated from `web/public/icon-512.png`: `python3 -I android/t
 
 ## Test checklist (on a real phone, widgets, by the owner)
 
-- [ ] **Install over 2.0.0**: `adb install -r neowatch-2.1.0.apk` succeeds; `versionCode=4`.
+- [ ] **Install over 2.1.0**: `adb install -r neowatch-2.1.1.apk` succeeds; `versionCode=5`.
 - [ ] Long press the home screen -> Widgets -> NEOWATCH: three widgets with a preview.
 - [ ] Place **Live now**: the options open, Done, channels appear with LIVE within seconds.
 - [ ] Place **My channels**, search, pick 4+, Done: names, now playing, OFF AIR / No guide words.

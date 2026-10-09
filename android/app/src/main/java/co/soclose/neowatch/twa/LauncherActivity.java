@@ -3,8 +3,11 @@ package co.soclose.neowatch.twa;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
+import android.app.UiModeManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -44,7 +47,9 @@ import android.widget.Toast;
  *  - only https://neowatch.soclose.co is ever loaded in the main frame; any other host is
  *    handed to the system (ACTION_VIEW), and if nothing can open it we stay put;
  *  - VIEW intents for https://neowatch.soclose.co/... (verified app links) open that exact URL;
- *  - BACK: WebView history first, then leave the app;
+ *  - BACK: leave fullscreen, else ask the page (window.__nwBack, 300 ms budget), else WebView
+ *    history, then leave the app;
+ *  - on a TV, the web app's TV switch (localStorage nw.tv) is set for every page of ours;
  *  - a main-frame load error shows a small dark "No connection" page that retries every 10 s.
  */
 public class LauncherActivity extends Activity {
@@ -57,8 +62,13 @@ public class LauncherActivity extends Activity {
 
     private static final long RETRY_MS = 10_000L;
     private static final long KEEP_ON_POLL_MS = 15_000L;
+    private static final long BACK_JS_TIMEOUT_MS = 300L;
     private static final String STATE_URL = "neowatch.url";
     private static final String RETRY_URL = "neowatch-shell://retry";
+    // The web app's TV switch (web/src/lib/device.ts): localStorage "nw.tv" = "1" turns on the
+    // 10-foot layout + D-pad autofocus. A TV WebView user agent does not say "TV", so the shell
+    // sets it on a TV, at the start of every page of ours (before the app's deferred scripts).
+    private static final String TV_FLAG_JS = "try{localStorage.setItem('nw.tv','1')}catch(e){}";
 
     private static final String ERROR_HTML =
             "<!doctype html><html><head><meta charset=utf-8>"
@@ -94,6 +104,7 @@ public class LauncherActivity extends Activity {
     private boolean mainFrameFailed;
     private boolean showingError;
     private boolean resumed;
+    private boolean isTv;
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -105,6 +116,7 @@ public class LauncherActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackgroundColor(BG);
         setContentView(root);
+        isTv = isTelevision();
 
         String saved = savedInstanceState == null ? null : savedInstanceState.getString(STATE_URL);
         String fromIntent = urlFromIntent(getIntent());
@@ -308,7 +320,10 @@ public class LauncherActivity extends Activity {
             // mainFrameFailed is NOT reset here: an HTTP error can be reported before
             // onPageStarted. It is reset where WE start a navigation (load/reload/goBack);
             // while the offline page covers the site nothing else can navigate.
-            if (url != null && isOwnUrl(Uri.parse(url))) currentUrl = url;
+            if (url != null && isOwnUrl(Uri.parse(url))) {
+                currentUrl = url;
+                if (isTv) view.evaluateJavascript(TV_FLAG_JS, null);
+            }
         }
 
         @Override
@@ -503,8 +518,25 @@ public class LauncherActivity extends Activity {
             // /chaine/<id>) goes to the home page instead of leaving. true = handled, false =
             // "nothing left here" (second Back on the home page): leave. No hook (an older
             // site, a page still loading): the plain history Back below.
-            web.evaluateJavascript("(function(){try{return window.__nwBack?!!window.__nwBack():null;}"
+            // evaluateJavascript is asynchronous: if the page does not answer within
+            // BACK_JS_TIMEOUT_MS (busy renderer, hung page), fall back to history so Back
+            // never feels dead; a late answer for that press is then ignored.
+            final WebView target = web;
+            final boolean[] settled = {false};   // per press: first of (answer, timeout) wins
+            final Runnable fallback = () -> {
+                if (settled[0]) return;
+                settled[0] = true;
+                if (web != target || isFinishing()) return;
+                Log.w(TAG, "__nwBack did not answer in " + BACK_JS_TIMEOUT_MS + " ms, history back");
+                historyBack();
+            };
+            handler.postDelayed(fallback, BACK_JS_TIMEOUT_MS);
+            target.evaluateJavascript("(function(){try{return window.__nwBack?!!window.__nwBack():null;}"
                     + "catch(e){return null;}})()", v -> {
+                handler.removeCallbacks(fallback);
+                if (settled[0]) return;
+                settled[0] = true;
+                if (web != target || isFinishing()) return;
                 if ("true".equals(v)) return;
                 if ("false".equals(v)) finish();
                 else historyBack();
@@ -524,6 +556,13 @@ public class LauncherActivity extends Activity {
     }
 
     // ------------------------------------------------------------------ screen
+
+    /** Android TV / Google TV (leanback) as opposed to a phone or tablet. */
+    private boolean isTelevision() {
+        UiModeManager ui = (UiModeManager) getSystemService(UI_MODE_SERVICE);
+        if (ui != null && ui.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION) return true;
+        return getPackageManager().hasSystemFeature(PackageManager.FEATURE_LEANBACK);
+    }
 
     /** Keep the TV awake only while something is actually playing (polled), so an idle
      *  NEOWATCH home screen still lets the screensaver / standby kick in. */
