@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Regenerate the launcher icons + the 320x180 Android TV banner from the PWA icon.
+"""Regenerate the 320x180 Android TV banner from the PWA icon.
+
+Launcher icons (adaptive bg/fg/monochrome + mipmaps) come from the owner-picked icon pack
+(NeoWatch "screen + play + live dot", SoClose rose, 09/10/2026), not from this script.
 
 Usage (from the repo root):  python3 -I android/tools/make_icons.py
 Needs Pillow. Source: web/public/icon-512.png. Output: android/app/src/main/res/.
@@ -18,8 +21,6 @@ FONTS = (
     "/System/Library/Fonts/Helvetica.ttc",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 )
-
-ICON_SIZES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 
 
 def font(size):
@@ -43,10 +44,6 @@ def rounded(icon):
 def main():
     icon = rounded(Image.open(SRC).convert("RGBA"))
 
-    for density, px in ICON_SIZES.items():
-        out = os.path.join(RES, f"mipmap-{density}", "ic_launcher.png")
-        icon.resize((px, px), Image.LANCZOS).save(out, optimize=True)
-
     # Banner: 320x180 at xhdpi (the size Android TV expects), dark bg, icon left, wordmark right.
     w, h = 320, 180
     banner = Image.new("RGBA", (w, h), BG)
@@ -61,9 +58,9 @@ def main():
     total = side + gap + text_w
     x0 = (w - total) // 2
     banner.alpha_composite(mark, (x0, (h - side) // 2))
-    draw.text((x0 + side + gap, (h - text_h) // 2 - tw[1]), text, font=f, fill=(0xE6, 0xF7, 0xFA, 255))
+    draw.text((x0 + side + gap, (h - text_h) // 2 - tw[1]), text, font=f, fill=(0xE9, 0xEE, 0xF2, 255))
     banner.convert("RGB").save(os.path.join(RES, "drawable-xhdpi", "banner.png"), optimize=True)
-    print("icons + banner written to", RES)
+    print("banner written to", RES)
 
 
 if __name__ == "__main__":

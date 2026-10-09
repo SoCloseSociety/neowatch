@@ -1,4 +1,4 @@
-# NEOWATCH for Android TV -- WebView shell (v2.1.2)
+# NEOWATCH for Android TV -- WebView shell (v2.1.3)
 
 A minimal native Android app that shows `https://neowatch.soclose.co` full-screen in the
 device's **system WebView**. One Activity (`LauncherActivity.java`), zero third-party
@@ -8,7 +8,7 @@ dependencies, a ~250 kB APK. Since v2.1.0 it also carries three **phone home-scr
 - Package: **`co.soclose.neowatch.twa`** (FROZEN: Sentinel House launches the app by this
   package, and `web/public/.well-known/assetlinks.json` is bound to it). The `.twa` suffix is
   historical; the app is no longer a TWA.
-- versionCode **6**, versionName **2.1.2** (2.1.1 was versionCode 5, 2.1.0 was 4, 2.0.0 was 3), minSdk 23, targetSdk 34, compileSdk 35.
+- versionCode **7**, versionName **2.1.3** (2.1.2 was versionCode 6, 2.1.1 was 5, 2.1.0 was 4, 2.0.0 was 3), minSdk 23, targetSdk 34, compileSdk 35.
 - Signed with the **existing** NEOWATCH key (alias `my-key-alias`, SHA-256
   `C8:6E:CD:...:F2:61`), so it installs over v1/v2 and the verified deep links keep working.
 
@@ -248,3 +248,10 @@ widget options survive rotation. Release checks: `apksigner verify` OK, certific
 `c86ecdaa...e8f261` = `assetlinks.json`, `aapt2 dump badging` = versionCode 6 with launcher +
 leanback + app-widget, `zipalign -c` OK, `check_widgets.py` OK. No device run for 2.1.2 (the TV
 flow was emulator-tested on 2.1.1; 2.1.2 changes are Java safety fixes). Published at `/app.apk`.
+
+## 2.1.3 (versionCode 7, 09/10/2026): the owner's rose icon
+The launcher icon is the owner-picked NeoWatch icon "screen + play + live dot" in SoClose rose
+(kie.ai pack by neobot-e1): adaptive `mipmap-anydpi-v26/ic_launcher(_round).xml` with
+`drawable-nodpi/ic_launcher_{bg,fg,mono}.png` (monochrome = Android 13+ themed icons), plus
+square and round mipmaps for older launchers. The TV banner is regenerated from the new
+`web/public/icon-512.png` by `tools/make_icons.py` (banner only now). Same checks as 2.1.2.

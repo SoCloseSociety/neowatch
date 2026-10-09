@@ -17,7 +17,7 @@
 // cache written by the previous worker (it could hold HTML stored as a chunk).
 
 const CACHE = 'neowatch-shell-v2-__SW_VERSION__';
-const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
+const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon-192.png'];
 const ASSETS = /*__SW_ASSETS__*/[];
 const STATIC_RE = /\.(js|css|svg|png|webp|jpe?g|ico|webmanifest|woff2?)$/i;
 
