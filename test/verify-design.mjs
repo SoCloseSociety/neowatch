@@ -740,6 +740,11 @@ for (const theme of THEMES) {
           const withTv = fmt.tv ? `${url}${url.includes('?') ? '&' : '?'}tv=1` : url;
           await page.goto(withTv, { waitUntil: 'domcontentloaded', timeout: 45000 });
           await page.waitForTimeout(3500);
+          // A cold shared host can answer the catalog after the fixed wait: on the pages
+          // that list channels, measure once the cards are there (or after 15 s more).
+          if (['home', 'search', 'grid'].includes(overlay ? 'home' : p)) {
+            await page.locator('main [data-card]').first().waitFor({ state: 'attached', timeout: 15000 }).catch(() => {});
+          }
           if (overlay) {
             if (OPENERS[overlay].pre) {
               await page.locator(OPENERS[overlay].pre).first().click({ timeout: 3000 }).catch(() => {});

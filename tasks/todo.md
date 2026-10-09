@@ -176,3 +176,11 @@ The app is feature-complete for v1 and hardened: 15,883 channels, free/premium t
 Initial build delivered a working, installable, self-hostable live-TV app over the public
 iptv-org catalog with admin/user separation and a multi-screen mode. See README for run steps.
 Open items above are roadmap, not blockers.
+
+## Review (v2.0 complete, 09/10/2026) -- LIVE @ 4fe6ed3
+
+- Two audit rounds (8 + 5 dimensions, each finding adversarially verified), all confirmed findings fixed or documented; `npm test` = 8 suites (~465 checks) gating every deploy.
+- Live validation after the last deploy: e2e 15/15, real playback 7-8/8 (third-party streams flap), TV funnel (land -> OK plays, Back closes + restores focus, deep link Back -> Home, `__nwBack`) all pass, verify-design 63 runs (7 pages x desktop/phone/TV x EN/FR/RU) 0 faults once the verifier waits for cards on a cold host.
+- Published: Android shell 2.1.2 / vc6 at `/app.apk` (signature + assetlinks fingerprint verified, sha256 8dd0da13...), `ANDROID_APK=/app.apk` in prod, `tv.html` links it. nginx document headers live (X-Frame-Options DENY, frame-ancestors 'none', nosniff, Referrer-Policy, HSTS).
+- Identity: SoClose rose thread (fleet rule), status palette = Sentinel House.
+- Owner-only, still open: a real TCL test of 2.1.2 (Sentinel House keeps its no-app fallback until then); which SoClose entity publishes NEOWATCH (+ SIRET) for the legal notice.
