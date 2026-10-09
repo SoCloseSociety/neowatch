@@ -35,12 +35,23 @@ const newPage = async (opts = {}) => {
   return page;
 };
 const cards = (page) => page.locator('main [data-card]');
+// A navigation can be aborted by the app's own pending history.back() (closing an
+// overlay pops its history entry a tick later): retry once instead of failing.
+async function goto(page, url, timeout) {
+  try {
+    return await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+  } catch (e) {
+    if (!/ERR_ABORTED/.test(String(e?.message))) throw e;
+    await page.waitForTimeout(500);
+    return page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+  }
+}
 
 try {
   const page = await newPage();
 
   // 1) Home: hero + rows of cards
-  await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  await goto(page, BASE + '/', 45000);
   await page.locator('[data-hero]').first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
   ok('home: hero visible', await page.locator('[data-hero]').first().isVisible().catch(() => false));
   await cards(page).first().waitFor({ state: 'attached', timeout: 20000 }).catch(() => {});
@@ -68,7 +79,7 @@ try {
     return (await r.json())?.items?.[0]?.id ?? null;
   });
   if (chId) {
-    await page.goto(`${BASE}/chaine/${chId}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await goto(page, `${BASE}/chaine/${chId}`, 30000);
     await page.locator('h1').first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
     const h1 = (await page.locator('h1').first().innerText().catch(() => '')).trim();
     ok(`channel page: title (${JSON.stringify(h1).slice(0, 30)})`, h1.length > 0);
@@ -76,7 +87,7 @@ try {
   } else ok('channel page reachable (got a channel id)', false);
 
   // 4) Player: a card click plays; the player records the played stream url
-  await page.goto(BASE + '/?cat=news', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await goto(page, BASE + '/?cat=news', 30000);
   await cards(page).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
   const first = cards(page).first();
   if (await first.count()) {
@@ -95,14 +106,14 @@ try {
   } else ok('a channel card to play', false);
 
   // 5) TV guide: programme blocks, or ONE honest empty state when no guide is loaded
-  await page.goto(BASE + '/programme-tv', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  await goto(page, BASE + '/programme-tv', 45000);
   await page.waitForFunction(() => document.querySelectorAll('[data-prog]').length >= 10 || document.querySelector('[data-empty]'), null, { timeout: 25000 }).catch(() => {});
   const progs = await page.locator('[data-prog-row] [data-prog]').count();
   const empties = await page.locator('[data-empty]:visible').count();
   ok(`guide: programme blocks (${progs}) or one empty state (${empties})`, progs >= 10 || empties === 1);
 
   // 6) Shareable filter URL loads the grid directly
-  await page.goto(BASE + '/?cat=news&country=FR', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  await goto(page, BASE + '/?cat=news&country=FR', 45000);
   await cards(page).first().waitFor({ state: 'attached', timeout: 15000 }).catch(() => {});
   ok(`filter URL ?cat=news&country=FR loads cards (${await cards(page).count()})`, (await cards(page).count()) > 0);
 
