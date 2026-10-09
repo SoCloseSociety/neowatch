@@ -195,6 +195,7 @@ export function TopBar() {
       <div className="mx-auto flex h-[var(--entete-h)] w-full max-w-[1760px] items-center gap-3 px-[var(--gouttiere)]">
         {/* Brand + status point */}
         <button type="button" onClick={goHome} className="flex shrink-0 items-center gap-2 rounded-field py-1" title={t('shell.home')}>
+          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-[var(--identite)]" />
           <span translate="no" className="brand text-libelle text-ink">
             NEOWATCH
           </span>
@@ -214,7 +215,7 @@ export function TopBar() {
               className={({ isActive }) =>
                 clsx(
                   'relative rounded-field px-3 py-2 text-sous font-medium transition-colors duration-d1',
-                  isActive ? 'text-ink after:absolute after:inset-x-3 after:-bottom-[2px] after:h-[3px] after:rounded-full after:bg-[var(--t1)]' : 'text-ink-3 hover:text-ink'
+                  isActive ? 'text-ink after:absolute after:inset-x-3 after:-bottom-[2px] after:h-[3px] after:rounded-full after:bg-[var(--identite)]' : 'text-ink-3 hover:text-ink'
                 )
               }
             >

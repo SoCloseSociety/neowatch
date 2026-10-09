@@ -32,8 +32,13 @@
   --amber: #e8b13a;
   --red: #ff5e5e;
   --violet: #7c8cff;
-  /* state OK / the thread ONLY, never a button fill */
+  /* state OK ONLY, never a button fill (the thread is the identity rose, below) */
   --accent: var(--mint);
+  /* SoClose identity (fleet rule, owner 2026-10-09): the rose marks "this is NEOWATCH /
+     you are here" (hero thread, brand point, active door), never a status and never a
+     button fill. Sentinel House itself keeps mint; the status palette above stays SH's. */
+  --rose: #f9a8d4;
+  --identite: var(--rose);
   --surface-carte: rgba(14,19,24,.88);
   --surface-mini: rgba(10,13,16,.72);
   --surface-pill: rgba(10,13,16,.8);
@@ -150,6 +155,7 @@
   --line-soft: rgba(90,70,50,.07);
   --line-strong: rgba(90,70,50,.22);
   --mint: #0b7556;
+  --rose: #b83280; /* deeper rose: readable on the cream page */
   --cyan: #0b6f86;
   --amber: #8a5a00;
   --red: #c03a2b;
@@ -561,13 +567,13 @@
     color: var(--encre-image);
     text-shadow: var(--ombre-texte-ciel);
   }
-  /* The ONE mint thread under the hero sentence: "on air now". */
+  /* The ONE identity thread under the hero sentence (SoClose rose). */
   .thread {
     display: block;
     width: var(--fil-l);
     height: var(--fil-h);
     border-radius: 1px;
-    background: var(--mint);
+    background: var(--identite);
   }
 
   /* ── toast (spec 2.10) ──────────────────────────────────────────────── */

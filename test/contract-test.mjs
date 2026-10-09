@@ -61,6 +61,7 @@ async function req(path, { method = 'GET', token, body } = {}) {
   const items = list.data?.items || [];
   check('200 with items', list.status === 200 && items.length > 0, `status=${list.status} n=${items.length}`);
   check('every item has id (djb2 base36), name, online', items.every((c) => ID_RE.test(String(c.id)) && typeof c.name === 'string' && has(c, 'online')));
+  check('limit is honoured', items.length <= 10, `n=${items.length}`);
 
   section('GET /api/catalog/channel/:id');
   // Prefer a channel with a tvg-id: it also exercises the ?channelId= fallback below.
@@ -122,6 +123,20 @@ async function req(path, { method = 'GET', token, body } = {}) {
           if (src) await req(`/api/admin/epg/${src.id}`, { method: 'DELETE', token });
         }
       }
+    }
+  }
+
+  section('GET /api/img?u= (logo relay, read by Sentinel House)');
+  check('no u -> 400', (await req('/api/img')).status === 400);
+  check('a URL the server does not vend -> 404 (never fetched)', (await req('/api/img?u=' + encodeURIComponent('https://example.com/x.png'))).status === 404);
+  const logo = items.map((c) => c.logo).find((u) => u && /^https?:/.test(u) && !/\.svg(\?|$)/i.test(u));
+  if (!logo) skipped('a catalog logo through the relay', 'no raster logo in the search sample');
+  else {
+    const r = await fetch(`${BASE}/api/img?u=${encodeURIComponent(logo)}`).catch(() => null);
+    if (!r || r.status !== 200) skipped('a catalog logo through the relay', `upstream answered ${r?.status ?? 'nothing'}`);
+    else {
+      check('vended logo -> 200 image/*', (r.headers.get('content-type') || '').startsWith('image/'), r.headers.get('content-type'));
+      check('relay answer carries nosniff + sandbox CSP', r.headers.get('x-content-type-options') === 'nosniff' && /sandbox/.test(r.headers.get('content-security-policy') || ''));
     }
   }
 

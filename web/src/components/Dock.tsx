@@ -16,7 +16,7 @@ const ITEMS = [
   { to: '/radios', key: 'nav.radio', icon: RadioTower, end: false },
 ] as const;
 
-const cell = 'flex min-h-[var(--cible-doigt)] flex-1 flex-col items-center justify-center gap-1 rounded-field text-min font-medium transition-colors duration-d1';
+const cell = 'relative flex min-h-[var(--cible-doigt)] flex-1 flex-col items-center justify-center gap-1 rounded-field text-min font-medium transition-colors duration-d1';
 
 export function Dock() {
   const t = useT();
@@ -42,6 +42,7 @@ export function Dock() {
           >
             {({ isActive }) => (
               <>
+                {isActive && <span aria-hidden="true" className="absolute top-0 h-[3px] w-6 rounded-full bg-[var(--identite)]" />}
                 <Icon size={20} aria-hidden="true" strokeWidth={isActive ? 2.2 : 1.8} />
                 <span>{t(key)}</span>
               </>

@@ -16,6 +16,7 @@ the build if one of them moves.
 | `GET /api/catalog/channel/:id` | `url`, `alternates` (array), `online`, `quality`, `logo`, `channelId` (tvg-id), `name`; 404 JSON when unknown | Sentinel House `direct.py`, `media.py`; Android widgets |
 | `GET /api/catalog/channels?q=` | `items[]` with `id`, `name`, `online` | Sentinel House `direct.py`, `integrations.py`; widget options screen |
 | `GET /api/catalog/meta` | `categories` (array), `total`, `online` | Sentinel House `integrations.py` |
+| `GET /api/img?u=<url-encoded logo>` | relays ONLY a logo the catalog/radio vends: 200 raster `image/*` with `nosniff` + sandbox CSP, 404 for any other URL, 400 without `u`; an `<img>` gets 204 when the logo is dead | Sentinel House (TV wall logos) |
 | `GET /api/epg/now?ids=<tvg-id>,...` | `{ channels: { <tvg-id>: { now, next } } }` (programme = `start`, `stop`, `title`, ...) | Sentinel House `media.py`; Android "My channels" widget |
 | `GET /api/epg/day?id=<tvg-id>` | `{ programmes: [{ start, stop, title, desc }], enabled }` | Sentinel House `media.py` |
 | `GET /api/health` | key `ok`; HTTP status (see section 3) | Neo `bot/config.py` (monitoring) |
