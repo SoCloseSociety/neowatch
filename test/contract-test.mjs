@@ -126,6 +126,11 @@ async function req(path, { method = 'GET', token, body } = {}) {
     }
   }
 
+  section('GET /api/config (additive androidApk)');
+  const cfg = await req('/api/config');
+  check('200', cfg.status === 200);
+  check('androidApk absent or a site path ending in .apk', cfg.data && (!('androidApk' in cfg.data) || /^\/[\w./-]+\.apk$/.test(cfg.data.androidApk)), JSON.stringify(cfg.data?.androidApk));
+
   section('GET /api/img?u= (logo relay, read by Sentinel House)');
   check('no u -> 400', (await req('/api/img')).status === 400);
   check('a URL the server does not vend -> 404 (never fetched)', (await req('/api/img?u=' + encodeURIComponent('https://example.com/x.png'))).status === 404);

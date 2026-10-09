@@ -191,10 +191,9 @@ app and `assetlinks.json` stays valid. `twa-manifest.json` is legacy (kept for h
    `python3 -I android/tools/check_widgets.py` prints OK): see `android/README.md`.
 3. Owner go-ahead, then publish:
    `bash scripts/deploy.sh --apk android/app/build/outputs/apk/release/app-release.apk`
-   (the previous APK is kept in the rollback copy). No page links to `/app.apk` yet: the
-   install panel shows "Get the TV app" only when `/api/config` carries `androidApk`, and no
-   server setting sends it today. Share `https://neowatch.soclose.co/app.apk` directly until
-   that setting exists.
+   (the previous APK is kept in the rollback copy). Then set `ANDROID_APK=/app.apk` in
+   `/root/neowatch/.env` and restart: `/api/config` sends `androidApk` and the install panel shows
+   "Get the TV app". `web/public/tv.html` (the TV install page) links `/app.apk` directly.
 4. Tell **Sentinel House** (`androidtv.py` `NAVIGATEURS_DE_TWA`, `media.py` `LIMITE_TWA`) that the
    app is now a WebView shell.
 

@@ -88,6 +88,9 @@ export const config = {
   premiumPeriodDays: Number(process.env.PREMIUM_PERIOD_DAYS) || 30,
   // Google AdSense publisher id (e.g. ca-pub-XXXX) shown to FREE users only.
   adsenseClient: process.env.ADSENSE_CLIENT || '',
+  // Path of the published Android shell (e.g. /app.apk), sent in /api/config so the install
+  // panel offers it. Empty (default) = no link: self-hosts without an APK show none.
+  androidApk: /^\/[\w./-]+\.apk$/.test(process.env.ANDROID_APK || '') ? process.env.ANDROID_APK : '',
   stripeSecret: process.env.STRIPE_SECRET || '',
   stripePriceId: process.env.STRIPE_PRICE_ID || '',
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
@@ -161,6 +164,9 @@ export function validateConfig() {
   }
   if (config.billingProvider === 'mock' && (config.isProd || config.requireAuth)) {
     add('warn', 'BILLING_PROVIDER', 'Using mock billing on a gated/prod instance: premium activates with no real payment.');
+  }
+  if (process.env.ANDROID_APK && !config.androidApk) {
+    console.warn('[config:warn] ANDROID_APK must be a site path ending in .apk (e.g. /app.apk): ignored.');
   }
   if (config.adsenseClient && !/^ca-pub-\d+/.test(config.adsenseClient)) {
     add('warn', 'ADSENSE_CLIENT', 'Does not look like a "ca-pub-..." publisher id.');

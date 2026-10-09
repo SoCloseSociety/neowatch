@@ -119,6 +119,7 @@ app.get('/api/config', (_req, res) => {
       checkout: checkoutAvailable(),
     },
     adsenseClient: config.adsenseClient,
+    ...(config.androidApk ? { androidApk: config.androidApk } : {}),
     premiumCategories: config.premiumCategories,
   });
 });

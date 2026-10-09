@@ -1,4 +1,4 @@
-# NEOWATCH for Android TV -- WebView shell (v2.1.1)
+# NEOWATCH for Android TV -- WebView shell (v2.1.2)
 
 A minimal native Android app that shows `https://neowatch.soclose.co` full-screen in the
 device's **system WebView**. One Activity (`LauncherActivity.java`), zero third-party
@@ -8,7 +8,7 @@ dependencies, a ~250 kB APK. Since v2.1.0 it also carries three **phone home-scr
 - Package: **`co.soclose.neowatch.twa`** (FROZEN: Sentinel House launches the app by this
   package, and `web/public/.well-known/assetlinks.json` is bound to it). The `.twa` suffix is
   historical; the app is no longer a TWA.
-- versionCode **5**, versionName **2.1.1** (2.1.0 was versionCode 4, 2.0.0 was 3), minSdk 23, targetSdk 34, compileSdk 35.
+- versionCode **6**, versionName **2.1.2** (2.1.1 was versionCode 5, 2.1.0 was 4, 2.0.0 was 3), minSdk 23, targetSdk 34, compileSdk 35.
 - Signed with the **existing** NEOWATCH key (alias `my-key-alias`, SHA-256
   `C8:6E:CD:...:F2:61`), so it installs over v1/v2 and the verified deep links keep working.
 
@@ -240,3 +240,11 @@ Icons/banner are generated from `web/public/icon-512.png`: `python3 -I android/t
 - [ ] **Screensaver**: idle on the home page, the TV screensaver still starts; while a channel
       plays, it does not.
 - [ ] **Sentinel House**: foreground detection reports `co.soclose.neowatch.twa` (not `com.tcl.browser`).
+
+## 2.1.2 (versionCode 6, published 09/10/2026)
+Round-2 fixes on top of 2.1.1: account exports (blob downloads) are saved, the keyboard no longer
+hides fields on phones, the own-URL check compares the raw authority and rebuilds the URL, the
+widget options survive rotation. Release checks: `apksigner verify` OK, certificate SHA-256
+`c86ecdaa...e8f261` = `assetlinks.json`, `aapt2 dump badging` = versionCode 6 with launcher +
+leanback + app-widget, `zipalign -c` OK, `check_widgets.py` OK. No device run for 2.1.2 (the TV
+flow was emulator-tested on 2.1.1; 2.1.2 changes are Java safety fixes). Published at `/app.apk`.
