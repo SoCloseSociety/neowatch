@@ -15,7 +15,7 @@ import { Pricing } from './components/Pricing';
 import { ProgramSearch } from './components/ProgramSearch';
 import { Preferences } from './components/Preferences';
 import { Account } from './components/Account';
-import { Spinner, EmptyState, ToastHost } from './components/ui';
+import { Spinner, EmptyState, ToastHost, BrandMark } from './components/ui';
 
 // A deploy replaces the hashed chunks: a tab opened before it fails to load a
 // lazy page ("Failed to fetch dynamically imported module"). Reload ONCE to get
@@ -53,7 +53,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
     if (!this.state.failed) return this.props.children;
     return (
       <div role="alert" className="flex h-screen flex-col items-center justify-center gap-3 bg-surface px-6 text-center text-ink">
-        <p translate="no" className="brand text-libelle text-ink-2">NEOWATCH</p>
+        <BrandMark as="p" className="text-ink-2" />
         <p className="text-carte font-semibold">{tr('shell.crashTitle')}</p>
         <p className="max-w-sm text-sous text-ink-2">{tr('shell.crashBody')}</p>
         <button type="button" autoFocus onClick={() => window.location.reload()} className="btn btn-primary mt-2">
@@ -229,7 +229,7 @@ function AuthWall() {
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
       <Lock size={28} aria-hidden="true" className="text-ink-3" />
-      <h1 translate="no" className="brand text-libelle text-ink">NEOWATCH</h1>
+      <BrandMark as="h1" className="m-0 text-ink" />
       <p className="max-w-xs text-sous text-ink-2">{t('gate.body')}</p>
       <button type="button" data-autofocus="" onClick={() => setLogin(true)} className="btn btn-primary mt-2">
         {t('top.login')}
@@ -342,7 +342,7 @@ function AppShell() {
   if (!ready || (locked && authPending)) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4 bg-surface" aria-busy="true">
-        <p translate="no" className="brand text-libelle text-ink-2">NEOWATCH</p>
+        <BrandMark as="p" className="text-ink-2" />
         <Spinner />
       </div>
     );

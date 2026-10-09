@@ -9,6 +9,7 @@ import { useAuth } from '@/store/authStore';
 import { useT, fmtNum, fmtTime } from '@/lib/i18n';
 import { debounce } from '@/lib/format';
 import { AvatarMenu } from './AvatarMenu';
+import { BrandMark } from './ui';
 
 // Top bar (spec 2.1, Sentinel "Barre"): brand + one status point at the left,
 // the four doors (Live TV, Guide, Movies, Radio) and Multi-view, the search,
@@ -195,10 +196,7 @@ export function TopBar() {
       <div className="mx-auto flex h-[var(--entete-h)] w-full max-w-[1760px] items-center gap-3 px-[var(--gouttiere)]">
         {/* Brand + status point */}
         <button type="button" onClick={goHome} className="flex shrink-0 items-center gap-2 rounded-field py-1" title={t('shell.home')}>
-          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-[var(--identite)]" />
-          <span translate="no" className="brand text-libelle text-ink">
-            NEOWATCH
-          </span>
+          <BrandMark className="text-ink" />
         </button>
         <div className="hidden xl:block">
           <Status />

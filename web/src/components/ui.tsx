@@ -261,6 +261,16 @@ export function ToastHost() {
 }
 
 // ── Loading ────────────────────────────────────────────────────────────
+/** The NEOWATCH mark: SoClose rose identity point + wordmark (same everywhere). */
+export function BrandMark({ className, as: Tag = 'span' }: { className?: string; as?: 'span' | 'p' | 'h1' }) {
+  return (
+    <Tag translate="no" className={clsx('brand inline-flex items-center gap-2 text-libelle', className)}>
+      <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-[var(--identite)]" />
+      NEOWATCH
+    </Tag>
+  );
+}
+
 export function Spinner({ className }: { className?: string }) {
   return <div className={clsx('h-5 w-5 animate-spin rounded-full border-2 border-line-strong border-t-ink-2', className)} />;
 }
